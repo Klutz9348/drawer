@@ -1,15 +1,11 @@
 using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using Features.Drawing.Domain;
 using Features.Drawing.Domain.Interface;
 using Features.Drawing.Domain.ValueObject;
 using Features.Drawing.Service;
-using Features.Drawing.Domain.Algorithm;
-using Features.Drawing.Domain.Data;
 using Features.Drawing.Domain.Entity;
 using Common.Constants;
-using Common.Utils;
 using Features.Drawing.App.Command;
 using Features.Drawing.App.Interface;
 using Features.Drawing.App.State;
@@ -64,10 +60,6 @@ namespace Features.Drawing.App
 
         private IEnumerator Start()
         {
-            // Performance: Limit frame rate to 60 FPS
-            Application.targetFrameRate = 60;
-            QualitySettings.vSyncCount = 0;
-
             // Wait for DI initialization (DrawingContext runs before this due to DefaultExecutionOrder)
             yield return null;
 

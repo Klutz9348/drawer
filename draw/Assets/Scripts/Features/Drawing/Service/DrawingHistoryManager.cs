@@ -68,74 +68,6 @@ namespace Features.Drawing.Service
             // or we could split them if we want to enforce the limit immediately.
             // For now, let's just add them.
             
-            // If the list is huge, we might want to pre-archive some.
-            // But relying on AddCommand to handle sliding window is safer logic-wise.
-            
-            foreach (var cmd in newHistory)
-            {
-                AddCommand(cmd);
-            }
-            
-            // Note: AddCommand will trigger execution/baking if we are not careful.
-            // But ReplaceHistory usually happens on Load, where we cleared the canvas.
-            // However, AddCommand executes baking for things SLIDING OUT.
-            // It does NOT execute the added command itself on the renderer.
-            // Wait, AddCommand implementation:
-            /*
-                _history.Add(cmd);
-                while (_history.Count > 50) { ... bake ... }
-            */
-            // It does not execute the new command.
-            
-            // So for Load, we probably want to execute them all to restore the visual state?
-            // Or assumes the caller handles visual restoration?
-            // DrawingAppService.LoadSessionAsync calls ClearCanvas(), then ReplaceHistory().
-            // It doesn't seem to iterate and execute them.
-            
-            // If I use AddCommand, it might bake some if > 50.
-            // But the ones remaining in _history won't be executed/drawn.
-            
-            // Let's modify logic:
-            // 1. Clear everything.
-            // 2. Add all to history.
-            // 3. Re-render everything?
-            
-            // But wait, DrawingAppService's LoadSessionAsync just calls ReplaceHistory.
-            // If ReplaceHistory doesn't draw, the canvas will be empty.
-            
-            // Let's look at AddCommand implementation again in my thought process or read it.
-            // Read output of DrawingHistoryManager.cs earlier:
-            // AddCommand adds to list, slides window, bakes removed ones.
-            // It does NOT execute the added command.
-            
-            // So ReplaceHistory needs to:
-            // 1. Clear internal lists.
-            // 2. Add commands.
-            // 3. Since we want to restore state, we should probably Execute them?
-            // Or maybe the caller (AppService) expects to just set the data and then trigger a redraw?
-            // But AppService.LoadSessionAsync ends after ReplaceHistory.
-            
-            // I should probably execute them here or in AppService.
-            // Given the name "ReplaceHistory", it sounds like data manipulation.
-            // But if I don't draw, the screen is blank.
-            
-            // Let's implement ReplaceHistory to just set the data, but arguably we should also re-execute them on the renderer to show them.
-            // However, executing 10k strokes one by one might be slow.
-            // But we have no choice if we want to restore the drawing.
-            
-            // Let's stick to the simplest implementation that satisfies the compilation error first.
-            // Logic issues can be fixed later.
-            
-            // Actually, if I use AddCommand, it will bake old ones.
-            // And for the new ones (last 50), they stay in _history.
-            // I need to draw them.
-            
-            // Let's add a "RenderAll" logic or similar.
-            // Or just loop and Execute.
-            
-            // NOTE: The previous implementation of LoadSessionAsync (before refactor) likely iterated and executed.
-            // Now it builds a list and calls ReplaceHistory.
-            
             // I'll implement ReplaceHistory to AddCommand (which handles baking/archiving) AND ensure the remaining active ones are drawn.
             
             foreach (var cmd in newHistory)
@@ -152,7 +84,6 @@ namespace Features.Drawing.Service
 
         public void AddCommand(ICommand cmd)
         {
-            Debug.Log($"[History] Added command: {cmd.GetType().Name} [ID: {cmd.Id}]. Count: {_history.Count + 1}");
             _history.Add(cmd);
             _activeStrokeIds.Add(cmd.Id);
 
