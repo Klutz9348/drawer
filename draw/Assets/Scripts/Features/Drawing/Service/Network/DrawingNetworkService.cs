@@ -6,6 +6,7 @@ using Features.Drawing.Domain.ValueObject;
 using Features.Drawing.Domain.Interface;
 using Features.Drawing.App;
 using Features.Drawing.Domain;
+using Common.Utils;
 
 namespace Features.Drawing.Service.Network
 {
@@ -17,7 +18,8 @@ namespace Features.Drawing.Service.Network
     {
         [Header("References")]
         // Decoupled: Removed direct reference to DrawingAppService
-        [SerializeField] private Features.Drawing.Presentation.GhostOverlayRenderer _ghostRenderer;
+        [SerializeField] private MonoBehaviour _ghostRendererComponent;
+        private Features.Drawing.Domain.Interface.IGhostRenderer _ghostRenderer;
 
         [Header("Ghost Settings")]
         [SerializeField] private bool _usePrediction = false;
@@ -59,6 +61,15 @@ namespace Features.Drawing.Service.Network
 
         private void Awake()
         {
+            if (_ghostRendererComponent != null)
+            {
+                _ghostRenderer = _ghostRendererComponent as Features.Drawing.Domain.Interface.IGhostRenderer;
+                if (_ghostRenderer == null)
+                {
+                    Debug.LogError("[DrawingNetworkService] GhostRendererComponent does not implement IGhostRenderer!");
+                }
+            }
+
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             if (_useBuildDefaults)
             {
@@ -120,7 +131,7 @@ namespace Features.Drawing.Service.Network
             {
                 StrokeId = strokeId,
                 BrushId = resolvedBrushId,
-                Color = ColorToUInt(color),
+                Color = ColorPacking.ToUInt(color),
                 Size = size,
                 Seed = 0 // TODO: Add seed to app service if needed
             };
@@ -506,21 +517,6 @@ namespace Features.Drawing.Service.Network
             {
                 kvp.Value.RenderFull();
             }
-        }
-
-        public static uint ColorToUInt(Color color)
-        {
-            Color32 c32 = color;
-            return (uint)((c32.r << 24) | (c32.g << 16) | (c32.b << 8) | c32.a);
-        }
-        
-        public static Color UIntToColor(uint color)
-        {
-            byte r = (byte)((color >> 24) & 0xFF);
-            byte g = (byte)((color >> 16) & 0xFF);
-            byte b = (byte)((color >> 8) & 0xFF);
-            byte a = (byte)(color & 0xFF);
-            return new Color32(r, g, b, a);
         }
 
         public static uint ComputeStrokeChecksum(IReadOnlyList<LogicPoint> points)

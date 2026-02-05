@@ -3,7 +3,7 @@ using UnityEngine;
 using Features.Drawing.Domain.ValueObject;
 using Common.Constants;
 
-namespace Features.Drawing.Presentation
+namespace Features.Drawing.Domain.Logic
 {
     /// <summary>
     /// Handles the mathematical logic of generating "stamps" from stroke points.

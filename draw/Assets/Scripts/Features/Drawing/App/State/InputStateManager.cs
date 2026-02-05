@@ -88,14 +88,6 @@ namespace Features.Drawing.App.State
             }
         }
 
-        public void SetStabilization(float factor)
-        {
-            if (_currentStrategy != null)
-            {
-                _currentStrategy.StabilizationFactor = Mathf.Clamp(factor, 0f, 0.95f);
-            }
-        }
-
         public void SetEraser(bool isEraser)
         {
             _isEraser = isEraser;

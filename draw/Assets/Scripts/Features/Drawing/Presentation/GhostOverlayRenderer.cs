@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using Features.Drawing.Domain;
 using Features.Drawing.Domain.Interface;
 using Features.Drawing.Domain.ValueObject;
+using Features.Drawing.Domain.Logic;
+using Common.Constants;
 
 namespace Features.Drawing.Presentation
 {
@@ -13,7 +15,7 @@ namespace Features.Drawing.Presentation
     /// Overlays on top of the main canvas.
     /// Uses Retained Mode (Clear & Redraw per frame) to support Extrapolation/Prediction.
     /// </summary>
-    public class GhostOverlayRenderer : MonoBehaviour
+    public class GhostOverlayRenderer : MonoBehaviour, IGhostRenderer
     {
         [Header("References")]
         [SerializeField] private CanvasRenderer _mainRenderer;
@@ -125,7 +127,7 @@ namespace Features.Drawing.Presentation
             _props = new MaterialPropertyBlock();
         }
 
-        // --- IStrokeRenderer Implementation ---
+        // --- IGhostRenderer Implementation ---
 
         public void ConfigureBrush(BrushStrategy strategy, Texture2D runtimeTexture = null)
         {

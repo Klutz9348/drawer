@@ -1,6 +1,6 @@
 using UnityEngine;
 using UnityEngine.Rendering;
-using Features.Drawing.Presentation;
+using Features.Drawing.Domain.ValueObject;
 
 namespace Features.Drawing.Domain
 {

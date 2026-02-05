@@ -6,6 +6,7 @@ using UnityEngine.Rendering;
 using TMPro;
 using Features.Drawing.Presentation;
 using Features.Drawing.Domain;
+using Features.Drawing.Domain.ValueObject;
 
 namespace Editor
 {

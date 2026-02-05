@@ -6,25 +6,17 @@ using System.Collections.Generic;
 using Features.Drawing.Domain;
 using Features.Drawing.Domain.ValueObject;
 using Common.Constants;
-using Features.Drawing.App;
+using Features.Drawing.Domain.Interface;
+using Features.Drawing.Domain.Logic;
 
 namespace Features.Drawing.Presentation
 {
-    /// <summary>
-    /// Defines how the brush texture rotates.
-    /// </summary>
-    public enum BrushRotationMode
-    {
-        None = 0,       // Always 0 degrees
-        Follow = 1,     // Follows stroke direction (Snake-like)
-        Fixed = 2       // Fixed angle (Calligraphy-like), currently defaults to 45 deg or 0
-    }
 
     /// <summary>
     /// Handles the low-level GPU drawing using CommandBuffers.
     /// Implements the "Mesh Stamping" technique.
     /// </summary>
-    public class CanvasRenderer : MonoBehaviour, Features.Drawing.Domain.Interface.IStrokeRenderer
+    public class CanvasRenderer : MonoBehaviour, IStrokeRenderer, ICanvasResolutionProvider, IRendererInitializer
     {
         [Header("Settings")]
         [SerializeField] private Vector2Int _resolution = new Vector2Int(2048, 2048);
@@ -39,6 +31,7 @@ namespace Features.Drawing.Presentation
         [SerializeField] private bool _isEraser = false;
         [SerializeField] private float _brushOpacity = 1.0f; // 0-1
         [SerializeField] private BrushRotationMode _rotationMode = BrushRotationMode.None;
+        [SerializeField] private bool _enableDiagnostics = true;
 
         // Size Management
         private float _baseBrushSize = 50.0f; // Raw size from logic
@@ -147,15 +140,6 @@ namespace Features.Drawing.Presentation
 
             _isInitialized = true;
         }
-
-        // Deprecated synchronous init
-        public void Initialize()
-        {
-             StartCoroutine(InitializeAsync());
-        }
-
-        // Removed InitializeRoutine
-
 
         private void OnLayoutChanged()
         {
@@ -481,7 +465,7 @@ namespace Features.Drawing.Presentation
             {
                  // Only warn if we had significant input (LogicPoint resolution might cause small movements to be skipped)
                  // But if pointsCount is large, it's definitely an issue.
-                 if (DrawingAppService.DebugMode && pointsCount > 1) 
+                 if (_enableDiagnostics && pointsCount > 1) 
                  {
                      Debug.LogWarning($"[Renderer] Zero stamps generated! Input: {pointsCount}, Size: {_brushSize}, Res: {_layoutController.Resolution}");
                  }
@@ -526,17 +510,6 @@ namespace Features.Drawing.Presentation
         // Cache for batching (optimization)
         private Matrix4x4[] _matrices = new Matrix4x4[BATCH_SIZE];
 
-        private void DrawStamp(Vector2 pos, float size, float angle)
-        {
-            // Fallback / Legacy single draw
-             Matrix4x4 matrix = Matrix4x4.TRS(
-                new Vector3(pos.x, pos.y, 0), 
-                Quaternion.Euler(0, 0, angle),
-                new Vector3(size, size, 1)
-            );
-            _cmd.DrawMesh(_quadMesh, matrix, _brushMaterial, 0, 0, _props);
-        }
-        
         public void ClearCanvas()
         {
             var target = _isBaking ? _layoutController.BakedRT : _layoutController.ActiveRT;

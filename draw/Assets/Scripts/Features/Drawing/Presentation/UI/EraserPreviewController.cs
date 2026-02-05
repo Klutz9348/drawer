@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
-using Features.Drawing.App;
+using Features.Drawing.App.Interface;
+using Features.Drawing.Domain.Interface;
 using Features.Drawing.Domain;
 using Features.Drawing.Presentation;
 
@@ -13,13 +14,16 @@ namespace Features.Drawing.Presentation.UI
     public class EraserPreviewController : MonoBehaviour
     {
         [Header("References")]
-        [SerializeField] private DrawingAppService _appService;
-        [SerializeField] private CanvasRenderer _canvasRenderer;
+        [SerializeField] private MonoBehaviour _appService; // Serialized as MonoBehaviour for Interface
+        [SerializeField] private MonoBehaviour _rendererComponent; // Serialized as MonoBehaviour for Interface
         [SerializeField] private RectTransform _inputArea;
         
         [Header("Visual Settings")]
         [SerializeField] private Color _previewColor = new Color(1f, 0f, 0f, 0.3f);
         [SerializeField] private Sprite _defaultCircleSprite;
+
+        private IDrawingFacade _drawingFacade;
+        private ICanvasResolutionProvider _resolutionProvider;
 
         private GameObject _previewObj;
         private RectTransform _previewRect;
@@ -35,11 +39,27 @@ namespace Features.Drawing.Presentation.UI
 
         private void InitializeReferences()
         {
-            if (_appService == null)
-                _appService = FindObjectOfType<DrawingAppService>();
+            // Resolve IDrawingFacade
+            if (_appService != null)
+                _drawingFacade = _appService as IDrawingFacade;
 
-            if (_canvasRenderer == null)
-                _canvasRenderer = FindObjectOfType<CanvasRenderer>();
+            if (_drawingFacade == null)
+            {
+                var facade = FindDrawingFacade();
+                _drawingFacade = facade;
+                _appService = facade as MonoBehaviour;
+            }
+
+            // Resolve ICanvasResolutionProvider
+            if (_rendererComponent != null)
+                _resolutionProvider = _rendererComponent as ICanvasResolutionProvider;
+
+            if (_resolutionProvider == null)
+            {
+                var provider = FindResolutionProvider();
+                _resolutionProvider = provider;
+                _rendererComponent = provider as MonoBehaviour;
+            }
 
             // If input area is not assigned, try to find the one used by MouseInputProvider or default to this transform if it's a RectTransform
             if (_inputArea == null)
@@ -55,6 +75,26 @@ namespace Features.Drawing.Presentation.UI
                      _inputArea = GetComponentInParent<Canvas>()?.GetComponent<RectTransform>();
                 }
             }
+        }
+        
+        private IDrawingFacade FindDrawingFacade()
+        {
+            var components = FindObjectsOfType<MonoBehaviour>();
+            foreach (var c in components)
+            {
+                if (c is IDrawingFacade f) return f;
+            }
+            return null;
+        }
+
+        private ICanvasResolutionProvider FindResolutionProvider()
+        {
+            var components = FindObjectsOfType<MonoBehaviour>();
+            foreach (var c in components)
+            {
+                if (c is ICanvasResolutionProvider p) return p;
+            }
+            return null;
         }
 
         private void CreatePreviewObject()
@@ -121,13 +161,9 @@ namespace Features.Drawing.Presentation.UI
 
         private void Update()
         {
-            if (_appService == null || _canvasRenderer == null || _previewObj == null || _inputArea == null) return;
+            if (_drawingFacade == null || _resolutionProvider == null || _previewObj == null || _inputArea == null) return;
 
-            bool show = _appService.IsEraser;
-            
-            // Also check if mouse is inside input area? 
-            // The user requirement says "follow mouse", usually we only show it when cursor is valid.
-            // But simple on/off based on tool is a good start.
+            bool show = _drawingFacade.IsEraser;
             
             if (show)
             {
@@ -142,23 +178,24 @@ namespace Features.Drawing.Presentation.UI
 
         private void UpdatePreview()
         {
-            // 1. Update Position
+            // 1. Follow Mouse
             Vector2 screenPos = Input.mousePosition;
             Camera worldCam = null;
-            if (_inputArea.GetComponentInParent<Canvas>().renderMode != RenderMode.ScreenSpaceOverlay)
+            Canvas canvas = _inputArea.GetComponentInParent<Canvas>();
+            if (canvas.renderMode != RenderMode.ScreenSpaceOverlay)
             {
-                worldCam = _inputArea.GetComponentInParent<Canvas>().worldCamera;
+                worldCam = canvas.worldCamera;
                 if (worldCam == null) worldCam = Camera.main;
             }
 
-            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(_inputArea, screenPos, worldCam, out Vector2 localPos))
+            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                _inputArea, screenPos, worldCam, out Vector2 localPos))
             {
-                _previewRect.anchoredPosition = localPos;
+                _previewRect.localPosition = localPos;
             }
 
             // 2. Update Size
-            // Calculate scale ratio
-            Vector2Int rtRes = _canvasRenderer.Resolution;
+            Vector2Int rtRes = _resolutionProvider.Resolution;
             if (rtRes.x <= 0 || rtRes.y <= 0) return;
 
             Rect uiRect = _inputArea.rect;
@@ -166,24 +203,13 @@ namespace Features.Drawing.Presentation.UI
             float scaleY = uiRect.height / rtRes.y;
             
             // Use the smaller scale to fit (aspect ratio fit)
-            // Or assume uniform scale if aspect ratios match.
-            // In CanvasRenderer, we fit RT into UI.
             float scale = Mathf.Min(scaleX, scaleY);
             
-            float brushSizePixels = _appService.CurrentSize;
+            float brushSizePixels = _drawingFacade.CurrentSize;
             
-            // Apply BrushStrategy Size Multiplier if needed?
-            // DrawingAppService.CurrentSize already includes it?
-            // Checking DrawingAppService: SetSize sets _currentSize. 
-            // CanvasRenderer.SetBrushSize sets _baseBrushSize, then multiplies by _sizeMultiplier.
-            // DrawingAppService doesn't know about _sizeMultiplier inside renderer, 
-            // BUT DrawingAppService calls _renderer.SetBrushSize(size).
-            // AND CanvasRenderer applies multiplier internally.
-            
-            // So _appService.CurrentSize is the BASE size.
-            // We need to apply the strategy multiplier to get the true visual size.
+            // Apply BrushStrategy Size Multiplier if needed
             float multiplier = 1.0f;
-            BrushStrategy strategy = _appService.EraserStrategy;
+            BrushStrategy strategy = _drawingFacade.EraserStrategy;
             if (strategy != null)
             {
                 multiplier = strategy.SizeMultiplier;
@@ -200,8 +226,6 @@ namespace Features.Drawing.Presentation.UI
         {
             Texture2D tex = strategy.MainTexture;
             
-            // If strategy uses procedural, we might want to stick with default circle
-            // If strategy has a texture, use it.
             if (tex != null && tex != _lastTexture)
             {
                 _lastTexture = tex;
@@ -222,8 +246,6 @@ namespace Features.Drawing.Presentation.UI
         {
             if (_generatedSprite != null) Destroy(_generatedSprite);
             if (_defaultCircleSprite != null) Destroy(_defaultCircleSprite);
-            // Note: Don't destroy _previewObj if it's part of the scene, but here we created it dynamically.
-            // If we created it, we should destroy it.
             if (_previewObj != null) Destroy(_previewObj);
         }
     }

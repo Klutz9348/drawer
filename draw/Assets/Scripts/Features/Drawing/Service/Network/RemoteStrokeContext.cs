@@ -2,8 +2,10 @@ using System.Collections.Generic;
 using UnityEngine;
 using Features.Drawing.Domain.ValueObject;
 using Features.Drawing.Domain.Network;
-using Features.Drawing.Presentation; // Added for GhostOverlayRenderer
+using Features.Drawing.Domain.Interface;
+using Features.Drawing.Domain.Logic;
 using Common.Constants;
+using Common.Utils;
 
 namespace Features.Drawing.Service.Network
 {
@@ -24,7 +26,7 @@ namespace Features.Drawing.Service.Network
         public int LastReceivedSequenceId => _lastReceivedSequenceId;
         
         // Rendering State
-        private readonly GhostOverlayRenderer _ghostRenderer;
+        private readonly IGhostRenderer _ghostRenderer;
         private readonly bool _usePrediction;
         private Features.Drawing.Domain.BrushStrategy _strategy;
         private List<LogicPoint> _predictionBuffer = new List<LogicPoint>(512);
@@ -36,7 +38,7 @@ namespace Features.Drawing.Service.Network
         private bool _hasLastSpacingPoint;
         private int _lastRenderedIndex = 0;
 
-        public RemoteStrokeContext(uint strokeId, GhostOverlayRenderer ghostRenderer, bool usePrediction)
+        public RemoteStrokeContext(uint strokeId, IGhostRenderer ghostRenderer, bool usePrediction)
         {
             StrokeId = strokeId;
             _ghostRenderer = ghostRenderer;
@@ -171,7 +173,7 @@ namespace Features.Drawing.Service.Network
                 // Or just use default for now if helper missing.
                 // Actually DrawingNetworkService had ColorToUInt.
                 // We'll interpret it here.
-                color = DrawingNetworkService.UIntToColor(Metadata.Color);
+                color = ColorPacking.ToColor(Metadata.Color);
                 size = Metadata.Size;
                 isEraser = Metadata.BrushId == Common.Constants.DrawingConstants.ERASER_BRUSH_ID;
             }
@@ -194,7 +196,7 @@ namespace Features.Drawing.Service.Network
 
             if (Metadata.StrokeId != 0)
             {
-                color = DrawingNetworkService.UIntToColor(Metadata.Color);
+                color = ColorPacking.ToColor(Metadata.Color);
                 size = Metadata.Size;
                 isEraser = Metadata.BrushId == Common.Constants.DrawingConstants.ERASER_BRUSH_ID;
             }
@@ -250,7 +252,7 @@ namespace Features.Drawing.Service.Network
 
             if (Metadata.StrokeId != 0)
             {
-                color = DrawingNetworkService.UIntToColor(Metadata.Color);
+                color = ColorPacking.ToColor(Metadata.Color);
                 size = Metadata.Size;
                 isEraser = Metadata.BrushId == Common.Constants.DrawingConstants.ERASER_BRUSH_ID;
             }

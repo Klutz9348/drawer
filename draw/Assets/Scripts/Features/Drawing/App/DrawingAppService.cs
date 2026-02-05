@@ -5,11 +5,11 @@ using Features.Drawing.Domain;
 using Features.Drawing.Domain.Interface;
 using Features.Drawing.Domain.ValueObject;
 using Features.Drawing.Service;
-using Features.Drawing.Presentation; 
 using Features.Drawing.Domain.Algorithm;
 using Features.Drawing.Domain.Data;
 using Features.Drawing.Domain.Entity;
 using Common.Constants;
+using Common.Utils;
 using Features.Drawing.App.Command;
 using Features.Drawing.App.Interface;
 using Features.Drawing.App.State;
@@ -21,16 +21,15 @@ namespace Features.Drawing.App
     /// Facade service that coordinates input, domain logic, and rendering.
     /// This is the main entry point for the drawing feature.
     /// </summary>
-    public class DrawingAppService : MonoBehaviour, IInputHandler, IBrushRegistry
+    public class DrawingAppService : MonoBehaviour, IDrawingFacade, IBrushRegistry
     {
         [Header("References")]
-        [SerializeField] private Features.Drawing.Presentation.CanvasRenderer _concreteRenderer; 
+        [SerializeField] private MonoBehaviour _concreteRenderer;
         [SerializeField] private BrushStrategy _eraserStrategy; // Hard brush for eraser
         [SerializeField] private BrushStrategy[] _registeredBrushes; // Registry of available brushes
         
         [Header("Diagnostics")]
         [SerializeField] private bool _enableDiagnostics = true;
-        public static bool DebugMode = true; // Static switch for other components
 
         private IStructuredLogger _logger;
         private PerformanceMonitor _perfMonitor;
@@ -42,6 +41,7 @@ namespace Features.Drawing.App
         // Public Accessors for UI/Preview
         public bool IsEraser => _inputState?.IsEraser ?? false;
         public float CurrentSize => _inputState?.CurrentSize ?? 10f;
+        public Color CurrentColor => _inputState?.CurrentColor ?? Color.black;
         public BrushStrategy EraserStrategy => _eraserStrategy;
 
         // Optimization State
@@ -91,16 +91,14 @@ namespace Features.Drawing.App
                 // Temporary DI setup for Logger if needed
             }
 
-            // 1. Resolve Renderer
-            if (_concreteRenderer == null) 
-                _concreteRenderer = FindObjectOfType<Features.Drawing.Presentation.CanvasRenderer>();
+            if (_concreteRenderer == null)
+                _concreteRenderer = FindRendererComponent();
 
-            // 2. Async Initialize Renderer (Wait for Shader Warmup & RT Allocation)
-            if (_concreteRenderer != null)
+            if (_concreteRenderer is IRendererInitializer initializer)
             {
-                yield return _concreteRenderer.InitializeAsync();
+                yield return initializer.InitializeAsync();
             }
-                
+
             IStrokeRenderer renderer = _concreteRenderer as IStrokeRenderer;
             
             if (renderer == null)
@@ -119,7 +117,6 @@ namespace Features.Drawing.App
             {
                 _enableDiagnostics = false;
             }
-            DebugMode = _enableDiagnostics;
         }
 
         private void OnDestroy()
@@ -173,11 +170,25 @@ namespace Features.Drawing.App
             _inputState = new InputStateManager(_renderer, _eraserStrategy);
 
             // 3. Setup Resolution Handling
-            if (_renderer is Features.Drawing.Presentation.CanvasRenderer concreteRenderer)
+            if (renderer is ICanvasResolutionProvider resolutionProvider)
             {
-                concreteRenderer.OnResolutionChanged += UpdateResolutionRatio;
-                UpdateResolutionRatio(concreteRenderer.Resolution);
+                resolutionProvider.OnResolutionChanged += UpdateResolutionRatio;
+                UpdateResolutionRatio(resolutionProvider.Resolution);
             }
+        }
+
+        private MonoBehaviour FindRendererComponent()
+        {
+            var components = FindObjectsOfType<MonoBehaviour>();
+            for (int i = 0; i < components.Length; i++)
+            {
+                if (components[i] is IStrokeRenderer)
+                {
+                    return components[i];
+                }
+            }
+
+            return null;
         }
 
         private void UpdateResolutionRatio(Vector2Int resolution)
@@ -200,26 +211,6 @@ namespace Features.Drawing.App
             _collisionService?.SetLogicToWorldRatio(_logicToWorldRatio);
         }
 
-        // --- Synchronization / Serialization Support ---
-
-        /// <summary>
-        /// Gets the complete history (Archived + Active) for synchronization or saving.
-        /// The result is the Source of Truth.
-        /// </summary>
-        public List<ICommand> GetFullHistory() => _historyManager.GetFullHistory();
-
-        /// <summary>
-        /// Replaces the current local history with a remote authoritative history.
-        /// This is a "Stop the World" full sync operation.
-        /// </summary>
-        public void ReplaceHistory(List<ICommand> remoteHistory) => _historyManager.ReplaceHistory(remoteHistory);
-
-        /// <summary>
-        /// Generates a lightweight checksum (hash) of the current history state.
-        /// Clients can exchange this string to detect desync.
-        /// </summary>
-        public string GetHistoryChecksum() => _historyManager.GetHistoryChecksum();
-
         // --- State Management ---
 
         public void SetBrushStrategy(BrushStrategy strategy, Texture2D runtimeTexture = null)
@@ -235,11 +226,6 @@ namespace Features.Drawing.App
         public void SetSize(float size)
         {
             _inputState?.SetSize(size);
-        }
-
-        public void SetStabilization(float factor)
-        {
-            _inputState?.SetStabilization(factor);
         }
 
         public void SetEraser(bool isEraser)
@@ -291,7 +277,7 @@ namespace Features.Drawing.App
             // Create Domain Entity
             uint id = (uint)Random.Range(0, int.MaxValue); // Simple random ID
             uint seed = (uint)Random.Range(0, int.MaxValue);
-            uint colorInt = ColorToUInt(_inputState.CurrentColor);
+            uint colorInt = ColorPacking.ToUInt(_inputState.CurrentColor);
             
             // Resolve Brush ID
             ushort brushId = GetBrushId(_inputState.CurrentStrategy);
@@ -466,114 +452,6 @@ namespace Features.Drawing.App
             _currentStroke = null;
         }
 
-        public void ForceEndCurrentStroke()
-        {
-            if (_currentStroke != null)
-            {
-                // Force end the current stroke and add it to history
-                EndStroke();
-            }
-        }
-
-        /// <summary>
-        /// Resumes a remote stroke that is currently in progress (e.g. after reconnection).
-        /// This allows the viewer to catch up with an ongoing stroke and continue receiving updates.
-        /// </summary>
-        public void ResumeRemoteStroke(uint id, List<LogicPoint> existingPoints, BrushStrategy strategy, Color color, float size, bool isEraser)
-        {
-            // 1. Force end any local stroke (safety)
-            ForceEndCurrentStroke();
-
-            // 2. Set State
-            if (isEraser)
-            {
-                SetEraser(true);
-                SetSize(size);
-                if (_eraserStrategy != null) _renderer.ConfigureBrush(_eraserStrategy);
-            }
-            else
-            {
-                SetBrushStrategy(strategy); // This sets _currentStrategy
-                SetColor(color);
-                SetSize(size);
-            }
-            
-            // 3. Initialize Stroke Entity (Network Source)
-            uint seed = (uint)Random.Range(0, int.MaxValue); // Seed doesn't matter much for resumption as long as consistent? 
-            // Actually, for perfect sync, we might need the original seed, but for now random is okay or passed in metadata.
-            uint colorInt = ColorToUInt(color);
-            ushort brushId = isEraser ? DrawingConstants.ERASER_BRUSH_ID : (ushort)0;
-            
-            _currentStroke = new StrokeEntity(id, 0, brushId, seed, colorInt, size, _nextSequenceId++);
-
-            // 4. Replay existing points
-            _currentStrokeRaw.Clear();
-            _currentStabilizedPos = Vector2.zero; // Reset stabilization
-            
-            if (existingPoints != null && existingPoints.Count > 0)
-            {
-                // Setup stabilization state from last point
-                _currentStabilizedPos = existingPoints[existingPoints.Count - 1].ToNormalized();
-                _lastAddedPoint = existingPoints[existingPoints.Count - 1];
-
-                // OPTIMIZATION: Batch Add Points
-                // Instead of calling AddPoint one by one (which triggers renderer frequently),
-                // we batch them up.
-                AddPointsBatch(existingPoints);
-            }
-            
-            // 5. DO NOT EndStroke. Wait for subsequent OnNetworkStrokeMoved/Ended events.
-        }
-
-        private void AddPointsBatch(List<LogicPoint> points)
-        {
-            if (_renderer == null || points == null || points.Count == 0) return;
-
-            // 1. Update Domain State
-            _currentStrokeRaw.AddRange(points);
-            
-            if (_currentStroke != null)
-            {
-                _currentStroke.AddPoints(points);
-            }
-
-            // 2. Render Batch
-            // For batch rendering, we can either:
-            // A) Just draw raw points (fastest)
-            // B) Run smoothing on the whole chain
-            
-            // Let's do a simplified smoothing run for the batch.
-            // If the batch is large, we can just process it as a continuous strip.
-            
-            if (points.Count < 4)
-            {
-                 // Too small for spline, draw directly
-                 _renderer.DrawPoints(points);
-            }
-            else
-            {
-                // Smooth the entire batch
-                // Note: This might be slightly different than incremental smoothing, 
-                // but for "Catch Up" it's acceptable and much faster.
-                // Or we can just use the incremental smoothing logic but batched.
-                
-                // For simplicity and performance in replay:
-                // We'll use the smoothing service's batch capability if it exists, or loop.
-                // But StrokeSmoothingService typically takes 4 points -> interpolates.
-                
-                // Optimization: Just draw raw for catch-up to avoid heavy CPU math?
-                // No, we want quality.
-                
-                // Let's assume we can just draw them. The renderer now supports Instancing,
-                // so drawing 1000 points is cheap on GPU.
-                // The issue is CPU spline interpolation.
-                // Let's just draw them directly for now to solve the bottleneck.
-                // If quality is bad, we can revisit.
-                
-                _renderer.DrawPoints(points);
-            }
-        }
-
         public void Undo()
         {
             if (!_historyManager.CanUndo) return;
@@ -608,28 +486,6 @@ namespace Features.Drawing.App
             RestoreState(savedColor, savedSize, savedEraser, savedStrategy, savedRuntimeTex);
         }
 
-        /// <summary>
-        /// Rebuilds the BakedRT from the logical archive.
-        /// Call this when:
-        /// 1. Resolution changes (and we want to keep high-quality vector strokes)
-        /// 2. Synchronization correction is needed (Source of Truth mismatch)
-        /// 3. Joining a room and receiving full history
-        /// </summary>
-        public void RebuildBackBuffer()
-        {
-            // Save state
-            var savedColor = _inputState.CurrentColor;
-            var savedSize = _inputState.CurrentSize;
-            var savedEraser = _inputState.IsEraser;
-            var savedStrategy = _inputState.CurrentStrategy;
-            var savedRuntimeTex = _inputState.CurrentRuntimeTexture;
-
-            _historyManager.RebuildBackBuffer();
-            
-            // Restore state
-            RestoreState(savedColor, savedSize, savedEraser, savedStrategy, savedRuntimeTex);
-        }
-
         private void RestoreState(Color color, float size, bool isEraser, BrushStrategy strategy, Texture2D runtimeTex)
         {
             if (isEraser)
@@ -643,12 +499,6 @@ namespace Features.Drawing.App
                 SetColor(color);
                 SetSize(size);
             }
-        }
-
-        private uint ColorToUInt(Color color)
-        {
-            Color32 c32 = color;
-            return (uint)((c32.r << 24) | (c32.g << 16) | (c32.b << 8) | c32.a);
         }
 
         private void AddPoint(LogicPoint point)
@@ -695,70 +545,23 @@ namespace Features.Drawing.App
         {
             if (stroke == null || stroke.Points.Count == 0) return;
 
-            // 1. Setup Renderer State for this stroke
             bool isEraser = stroke.BrushId == DrawingConstants.ERASER_BRUSH_ID;
-            
-            // Note: We are modifying the renderer state directly here.
-            // This is safe because this runs on the main thread, but we must ensure
-            // we restore it or that the next StartStroke resets it correctly (which it does).
-            
-            BrushStrategy strategy = null;
-            if (isEraser)
-            {
-                strategy = _eraserStrategy;
-                if (_renderer != null)
-                {
-                    if (strategy != null) _renderer.ConfigureBrush(strategy);
-                    _renderer.SetEraser(true);
-                    _renderer.SetBrushSize(stroke.Size);
-                }
-            }
-            else
-            {
-                // Lookup strategy by ID
-                strategy = GetBrushStrategy(stroke.BrushId);
-                
-                if (_renderer != null)
-                {
-                    // Use runtime texture if it's the current local user (not ideal logic for remote, but best guess)
-                    // For true remote, we should sync the texture ID or use the strategy's default.
-                    // Assuming strategy default for remote strokes.
-                    Texture2D tex = strategy?.MainTexture;
-                    if (strategy != null) _renderer.ConfigureBrush(strategy, tex);
-                    
-                    _renderer.SetEraser(false);
-                    // Convert uint color back to Color
-                    Color c = UIntToColor(stroke.ColorRGBA);
-                    _renderer.SetBrushColor(c);
-                    _renderer.SetBrushSize(stroke.Size);
-                }
-            }
+            BrushStrategy strategy = isEraser ? _eraserStrategy : GetBrushStrategy(stroke.BrushId);
 
-            // 2. Draw Full Stroke (Smoothly)
-            // We use the same smoothing logic as local strokes
-            if (_renderer != null)
-            {
-                // Create temp command to execute drawing logic?
-                // Or just draw directly.
-                // Let's draw directly using the smoothing service helper
-                
-                // We can reuse DrawStrokeCommand logic but we don't want to create a command instance just to execute it?
-                // Actually creating a command is exactly what we want, because we want to add it to history!
-            }
-
-            // 3. Create Command & Add to History
+            // Create Command & Add to History
+            // Note: We use the current runtime texture for now, but ideally this should be part of the stroke data if customized.
             var cmd = new DrawStrokeCommand(
                 stroke.Id.ToString(),
                 stroke.SequenceId,
                 new List<LogicPoint>(stroke.Points),
                 strategy,
-                _inputState.CurrentRuntimeTexture, // Might be wrong if remote user used different texture
-                UIntToColor(stroke.ColorRGBA),
+                _inputState.CurrentRuntimeTexture, 
+                ColorPacking.ToColor(stroke.ColorRGBA),
                 stroke.Size,
                 isEraser
             );
             
-            // Execute (Draws it)
+            // Execute (Draws it on main canvas)
             cmd.Execute(_renderer, _smoothingService);
             
             // Add to history
@@ -768,50 +571,12 @@ namespace Features.Drawing.App
             _collisionService.Insert(stroke);
             
             // Diagnostics
-            if (_logger != null && _enableDiagnostics) // Only log if explicitly enabled
+            if (_logger != null && _enableDiagnostics)
             {
-                 // _logger.Info("RemoteStrokeCommitted", Common.Diagnostics.TraceContext.New(), new Dictionary<string, object> { { "id", stroke.Id }, { "points", stroke.Points.Count } });
+                 // Log if needed
             }
         }
         
-        private Color UIntToColor(uint color)
-        {
-            byte r = (byte)((color >> 24) & 0xFF);
-            byte g = (byte)((color >> 16) & 0xFF);
-            byte b = (byte)((color >> 8) & 0xFF);
-            byte a = (byte)(color & 0xFF);
-            return new Color32(r, g, b, a);
-        }
-
-        public void ReceiveRemoteStroke(StrokeEntity stroke)
-        {
-            if (stroke == null) return;
-
-            bool isEraser = stroke.BrushId == DrawingConstants.ERASER_BRUSH_ID;
-            
-            if (isEraser)
-            {
-                _renderer.SetEraser(true);
-                if (_eraserStrategy != null) _renderer.ConfigureBrush(_eraserStrategy);
-            }
-            else
-            {
-                _renderer.SetEraser(false);
-                var strategy = GetBrushStrategy(stroke.BrushId);
-                if (strategy != null) _renderer.ConfigureBrush(strategy, strategy.MainTexture);
-            }
-            
-            _renderer.SetBrushSize(stroke.Size);
-            
-            // Convert UInt color back to Color
-            // ... (Omitted for brevity)
-
-            // Draw points (Smoothing logic needed here too ideally)
-            // For now just draw raw
-            _renderer.DrawPoints(stroke.Points);
-            
-            _renderer.EndStroke();
-        }
         public BrushStrategy GetBrushStrategy(ushort id)
         {
             if (id == DrawingConstants.ERASER_BRUSH_ID) return _eraserStrategy;

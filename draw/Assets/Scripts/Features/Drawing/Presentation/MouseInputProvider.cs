@@ -3,7 +3,6 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using Features.Drawing.Domain.ValueObject;
 using Features.Drawing.App.Interface;
-using Features.Drawing.App;
 
 namespace Features.Drawing.Presentation
 {
@@ -15,6 +14,7 @@ namespace Features.Drawing.Presentation
     {
         [SerializeField] private RectTransform _inputArea;
         [SerializeField] private MonoBehaviour _inputHandlerComponent; // Serialized as MonoBehaviour to allow Interface assignment (sort of)
+        [SerializeField] private bool _enableDiagnostics = true;
         
         public RectTransform InputArea => _inputArea;
         
@@ -46,16 +46,29 @@ namespace Features.Drawing.Presentation
             
             if (_inputHandler == null)
             {
-                // Fallback to finding the service
-                var service = FindObjectOfType<DrawingAppService>();
-                _inputHandler = service as IInputHandler;
-                _inputHandlerComponent = service; // Assign back for inspector consistency if possible
+                var handler = FindInputHandler();
+                _inputHandler = handler as IInputHandler;
+                _inputHandlerComponent = handler;
                 
                 if (_inputHandler == null)
                 {
                     Debug.LogError("MouseInputProvider: No IInputHandler found! Please assign DrawingAppService.");
                 }
             }
+        }
+
+        private MonoBehaviour FindInputHandler()
+        {
+            var components = FindObjectsOfType<MonoBehaviour>();
+            for (int i = 0; i < components.Length; i++)
+            {
+                if (components[i] is IInputHandler)
+                {
+                    return components[i];
+                }
+            }
+
+            return null;
         }
 
         private void Update()
@@ -83,7 +96,7 @@ namespace Features.Drawing.Presentation
                 bool blocked = IsPointerOverBlockingUi(screenPos);
                 if (blocked) 
                 {
-                    if (DrawingAppService.DebugMode)
+                    if (_enableDiagnostics)
                     {
                         Debug.LogWarning($"[Input] UI Block Detected at {screenPos}. Raycast hits: {_raycastResults.Count}");
                         foreach(var hit in _raycastResults) Debug.Log($"[Input] Hit UI: {hit.gameObject.name}");
@@ -113,7 +126,7 @@ namespace Features.Drawing.Presentation
             if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
                 _inputArea, screenPos, worldCam, out Vector2 localPos))
             {
-                if (DrawingAppService.DebugMode) Debug.LogWarning($"[Input] ScreenPointToLocalPointInRectangle Failed! Screen: {screenPos}, Cam: {worldCam?.name}");
+                if (_enableDiagnostics) Debug.LogWarning($"[Input] ScreenPointToLocalPointInRectangle Failed! Screen: {screenPos}, Cam: {worldCam?.name}");
                 return; 
             }
 
@@ -126,15 +139,16 @@ namespace Features.Drawing.Presentation
             {
                 if (_isDrawing) 
                 {
-                     if (DrawingAppService.DebugMode) Debug.Log($"[Input] Stroke Out of Bounds (u={u:F2}, v={v:F2}). Ending Stroke.");
+                     if (_enableDiagnostics) Debug.Log($"[Input] Stroke Out of Bounds (u={u:F2}, v={v:F2}). Ending Stroke.");
                      EndStroke();
                 }
+                return;
                 return;
             }
 
             if (isDown)
             {
-                if (DrawingAppService.DebugMode) Debug.Log($"[Input] StartStroke at UV({u:F4}, {v:F4}) Screen({screenPos})");
+                if (_enableDiagnostics) Debug.Log($"[Input] StartStroke at UV({u:F4}, {v:F4}) Screen({screenPos})");
                 StartStroke(normalizedPos);
                 if (isUp)
                 {

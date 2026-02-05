@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
-using Features.Drawing.App;
+using Features.Drawing.App.Interface;
 using Features.Drawing.Domain;
 using Common.Utils;
 
@@ -13,7 +13,7 @@ namespace Features.Drawing.Presentation.UI
     public class DrawingToolbar : MonoBehaviour
     {
         [Header("References")]
-        [SerializeField] private DrawingAppService _appService;
+        [SerializeField] private MonoBehaviour _appService;
 
         // Top Bar Buttons
         [SerializeField] private Button _btnUndo;
@@ -58,23 +58,25 @@ namespace Features.Drawing.Presentation.UI
         private Tab _activeTab = Tab.None;
         private bool _isEraserMode = false;
         private Color _currentUiColor = Color.black; // Default to black
+        private IDrawingFacade _drawingFacade;
 
         private void Start()
         {
-            if (_appService == null)
+            if (_appService != null)
             {
-                _appService = FindObjectOfType<DrawingAppService>();
-                if (_appService == null)
-                {
-                    var go = new GameObject("DrawingAppService");
-                    _appService = go.AddComponent<DrawingAppService>();
-                }
+                _drawingFacade = _appService as IDrawingFacade;
+            }
+
+            if (_drawingFacade == null)
+            {
+                _drawingFacade = FindDrawingFacade();
+                _appService = _drawingFacade as MonoBehaviour;
             }
 
             // Events
-            if (_appService != null)
+            if (_drawingFacade != null)
             {
-                _appService.OnStrokeStarted += OnStrokeStarted;
+                _drawingFacade.OnStrokeStarted += OnStrokeStarted;
             }
 
             // Top Bar
@@ -145,9 +147,9 @@ namespace Features.Drawing.Presentation.UI
 
         private void OnDestroy()
         {
-            if (_appService != null)
+            if (_drawingFacade != null)
             {
-                _appService.OnStrokeStarted -= OnStrokeStarted;
+                _drawingFacade.OnStrokeStarted -= OnStrokeStarted;
             }
         }
 
@@ -168,18 +170,32 @@ namespace Features.Drawing.Presentation.UI
                 {
                     if (shift)
                     {
-                        _appService.Redo();
+                        if (_drawingFacade != null) _drawingFacade.Redo();
                     }
                     else
                     {
-                        _appService.Undo();
+                        if (_drawingFacade != null) _drawingFacade.Undo();
                     }
                 }
                 else if (Input.GetKeyDown(KeyCode.Y))
                 {
-                    _appService.Redo();
+                    if (_drawingFacade != null) _drawingFacade.Redo();
                 }
             }
+        }
+
+        private IDrawingFacade FindDrawingFacade()
+        {
+            var components = FindObjectsOfType<MonoBehaviour>();
+            for (int i = 0; i < components.Length; i++)
+            {
+                if (components[i] is IDrawingFacade facade)
+                {
+                    return facade;
+                }
+            }
+
+            return null;
         }
 
         private void OnStrokeStarted()
@@ -206,7 +222,7 @@ namespace Features.Drawing.Presentation.UI
             {
                 case Tab.Brush:
                     _isEraserMode = false;
-                    _appService.SetEraser(false);
+                    if (_drawingFacade != null) _drawingFacade.SetEraser(false);
                     // Show Brush Panel
                     if (_panelContainer) _panelContainer.SetActive(true);
                     if (_panelBrush) _panelBrush.SetActive(true);
@@ -216,7 +232,7 @@ namespace Features.Drawing.Presentation.UI
                     break;
                 case Tab.Eraser:
                     _isEraserMode = true;
-                    _appService.SetEraser(true);
+                    if (_drawingFacade != null) _drawingFacade.SetEraser(true);
                     // Hide all panels
                     if (_panelContainer) _panelContainer.SetActive(false);
                     if (_panelBrush) _panelBrush.SetActive(false);
@@ -310,7 +326,8 @@ namespace Features.Drawing.Presentation.UI
 
         private void OnClearClick()
         {
-            _appService.ClearCanvas();
+            if (_drawingFacade == null) return;
+            _drawingFacade.ClearCanvas();
             // TODO: Clear history in AppService if we want "Clear" to be undoable or just wipe everything?
             // Usually Clear is a distinct action.
             // If user wants to Undo Clear, we'd need to treat Clear as a Command.
@@ -319,18 +336,21 @@ namespace Features.Drawing.Presentation.UI
 
         private void OnUndoClick()
         {
-            _appService.Undo();
+            if (_drawingFacade == null) return;
+            _drawingFacade.Undo();
         }
 
         private void OnRedoClick()
         {
-            _appService.Redo();
+            if (_drawingFacade == null) return;
+            _drawingFacade.Redo();
         }
 
         private void SetSize(float size)
         {
             _currentSize = size;
-            _appService.SetSize(size);
+            if (_drawingFacade == null) return;
+            _drawingFacade.SetSize(size);
             UpdateSizeTabDisplay();
             // Debug.Log($"Size set to: {size}");
         }
@@ -363,7 +383,8 @@ namespace Features.Drawing.Presentation.UI
 
         private void SetColor(Color c)
         {
-            _appService.SetColor(c);
+            if (_drawingFacade == null) return;
+            _drawingFacade.SetColor(c);
             _currentUiColor = c;
             
             // If we set color, we probably want to switch back to brush mode if we were in eraser
@@ -390,7 +411,7 @@ namespace Features.Drawing.Presentation.UI
             else
             {
                 // If we are already on Brush tab, just ensure Eraser is off (redundant but safe)
-                _appService.SetEraser(false);
+                if (_drawingFacade != null) _drawingFacade.SetEraser(false);
             }
 
             BrushStrategy strategy = null;
@@ -420,7 +441,7 @@ namespace Features.Drawing.Presentation.UI
                 runtimeTex = TextureGeneratorService.GetSharpHardBrush();
             }
             
-            _appService.SetBrushStrategy(strategy, runtimeTex);
+            _drawingFacade.SetBrushStrategy(strategy, runtimeTex);
         }
     }
 }

@@ -1,7 +1,7 @@
 using UnityEngine;
 using System.Runtime.InteropServices;
 
-namespace Features.Drawing.Presentation
+namespace Features.Drawing.Domain.ValueObject
 {
     [StructLayout(LayoutKind.Sequential)]
     public struct StampData
