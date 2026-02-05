@@ -60,6 +60,10 @@ namespace Features.Drawing.App
 
         private IEnumerator Start()
         {
+            // Performance: Limit frame rate to 60 FPS
+            Application.targetFrameRate = 60;
+            QualitySettings.vSyncCount = 0;
+
             // Wait for DI initialization (DrawingContext runs before this due to DefaultExecutionOrder)
             yield return null;
 

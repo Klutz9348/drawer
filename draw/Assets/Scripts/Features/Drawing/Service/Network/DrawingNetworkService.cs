@@ -8,6 +8,8 @@ using Features.Drawing.App;
 using Features.Drawing.Domain;
 using Common.Utils;
 
+using System.Linq;
+
 namespace Features.Drawing.Service.Network
 {
     /// <summary>
@@ -64,9 +66,24 @@ namespace Features.Drawing.Service.Network
             if (_ghostRendererComponent != null)
             {
                 _ghostRenderer = _ghostRendererComponent as Features.Drawing.Domain.Interface.IGhostRenderer;
-                if (_ghostRenderer == null)
+            }
+            
+            // Fallback: Try to find in scene if not assigned
+            if (_ghostRenderer == null)
+            {
+                // Use Linq to find by interface since we cannot reference Presentation assembly directly
+                var ghostObj = FindObjectsOfType<MonoBehaviour>()
+                    .OfType<Features.Drawing.Domain.Interface.IGhostRenderer>()
+                    .FirstOrDefault();
+
+                if (ghostObj != null)
                 {
-                    Debug.LogError("[DrawingNetworkService] GhostRendererComponent does not implement IGhostRenderer!");
+                    _ghostRenderer = ghostObj;
+                    Debug.Log("[DrawingNetworkService] Auto-resolved GhostOverlayRenderer from scene.");
+                }
+                else
+                {
+                    Debug.LogError("[DrawingNetworkService] GhostRendererComponent missing and not found in scene!");
                 }
             }
 
@@ -92,6 +109,11 @@ namespace Features.Drawing.Service.Network
             {
                 _networkClient.OnPacketReceived += OnPacketReceived;
             }
+        }
+
+        public void SetGhostRenderer(Features.Drawing.Domain.Interface.IGhostRenderer renderer)
+        {
+            _ghostRenderer = renderer;
         }
 
         public void InitializeBrushRegistry(IBrushRegistry registry)

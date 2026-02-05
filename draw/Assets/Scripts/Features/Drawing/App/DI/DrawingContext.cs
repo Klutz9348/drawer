@@ -7,6 +7,8 @@ using Features.Drawing.App.Data;
 using Features.Drawing.App.Input;
 using Features.Drawing.App.State;
 
+using System.Linq;
+
 namespace Features.Drawing.App.DI
 {
     /// <summary>
@@ -100,6 +102,16 @@ namespace Features.Drawing.App.DI
             if (_networkService != null)
             {
                 _appService.SetNetworkService(_networkService);
+
+                // Inject GhostRenderer if needed
+                var ghostRenderer = FindObjectsOfType<MonoBehaviour>()
+                    .OfType<Features.Drawing.Domain.Interface.IGhostRenderer>()
+                    .FirstOrDefault();
+
+                if (ghostRenderer != null)
+                {
+                    _networkService.SetGhostRenderer(ghostRenderer);
+                }
             }
             
             Debug.Log("[DrawingContext] Dependencies Injected successfully.");

@@ -61,6 +61,11 @@ namespace Features.Drawing.App.Command
                 renderer.SetBrushSize(_size);
             }
 
+            // Ensure generator state is reset for this new stroke execution
+            // Use the first point if available, or a default
+            var startPoint = (_points != null && _points.Count > 0) ? _points[0] : new LogicPoint(0, 0, 0);
+            renderer.StartStroke(startPoint, _isEraser, _size, _color);
+
             DrawStrokePoints(renderer, smoothingService);
             renderer.EndStroke();
         }
@@ -69,33 +74,19 @@ namespace Features.Drawing.App.Command
         {
             if (_points == null || _points.Count == 0) return;
 
-            if (!_isEraser && _points.Count < 4)
+            if (_isEraser || _points.Count < 4)
             {
                 renderer.DrawPoints(_points);
                 return;
             }
 
-            for (int i = 0; i < _points.Count; i++)
+            // Optimization: Smooth the entire stroke at once instead of simulating point-by-point input
+            _smoothingOutputBuffer.Clear();
+            smoothingService.SmoothPoints(_points, _smoothingOutputBuffer);
+            
+            if (_smoothingOutputBuffer.Count > 0)
             {
-                int count = i + 1;
-                
-                if (count >= 4)
-                {
-                     _smoothingInputBuffer.Clear();
-                     _smoothingInputBuffer.Add(_points[i - 3]);
-                     _smoothingInputBuffer.Add(_points[i - 2]);
-                     _smoothingInputBuffer.Add(_points[i - 1]);
-                     _smoothingInputBuffer.Add(_points[i]);
-
-                     smoothingService.SmoothPoints(_smoothingInputBuffer, _smoothingOutputBuffer);
-                     renderer.DrawPoints(_smoothingOutputBuffer);
-                }
-                else if (_isEraser)
-                {
-                    _singlePointBuffer.Clear();
-                    _singlePointBuffer.Add(_points[i]);
-                    renderer.DrawPoints(_singlePointBuffer);
-                }
+                renderer.DrawPoints(_smoothingOutputBuffer);
             }
         }
     }

@@ -129,11 +129,15 @@ namespace Features.Drawing.Service
 
         public void Undo()
         {
-            if (_history.Count == 0) return;
+            if (_history.Count == 0) 
+            {
+                Debug.LogWarning("[History] Undo called but history is empty.");
+                return;
+            }
 
             // Remove last command
             var cmd = _history[_history.Count - 1];
-            Debug.Log($"[Undo] Reverting command [ID: {cmd.Id}]");
+            Debug.Log($"[Undo] Reverting command [ID: {cmd.Id}]. Remaining: {_history.Count - 1}");
             _history.RemoveAt(_history.Count - 1);
             
             _activeStrokeIds.Remove(cmd.Id);
@@ -164,6 +168,9 @@ namespace Features.Drawing.Service
         {
             if (_renderer == null) return;
 
+            // Ensure we are not in baking mode
+            _renderer.SetBakingMode(false);
+
             // 1. Determine start state
             int startIndex = 0;
             bool fullClear = false;
@@ -186,9 +193,12 @@ namespace Features.Drawing.Service
             }
             else
             {
+                // This clears the active RT by copying the baked RT (which is clear or has baked strokes)
                 _renderer.RestoreFromBackBuffer();
             }
             
+            Debug.Log($"[RedrawHistory] Replaying {_history.Count - startIndex} commands. StartIndex: {startIndex}");
+
             // 3. Replay commands
             for (int i = startIndex; i < _history.Count; i++)
             {
