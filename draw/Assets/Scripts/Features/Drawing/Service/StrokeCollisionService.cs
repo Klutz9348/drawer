@@ -5,9 +5,11 @@ using Features.Drawing.Domain.Algorithm;
 using Features.Drawing.Domain.ValueObject;
 using Common.Constants;
 
+using Features.Drawing.Domain.Interface;
+
 namespace Features.Drawing.Service
 {
-    public class StrokeCollisionService
+    public class StrokeCollisionService : IStrokeCollisionService
     {
         private readonly StrokeSpatialIndex _spatialIndex;
 

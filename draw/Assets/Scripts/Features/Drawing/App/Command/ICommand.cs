@@ -6,6 +6,6 @@ namespace Features.Drawing.App.Command
     {
         string Id { get; }
         long SequenceId { get; }
-        void Execute(IStrokeRenderer renderer, Features.Drawing.Service.StrokeSmoothingService smoothingService);
+        void Execute(IStrokeRenderer renderer, IStrokeSmoothingService smoothingService);
     }
 }

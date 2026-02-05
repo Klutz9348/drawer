@@ -70,21 +70,17 @@ namespace Features.Drawing.App.State
 
         public void SetSize(float size)
         {
-            _currentSize = size;
-            
             // USER REQUEST: "Size is for changing brush size, not eraser."
             // So we ALWAYS update _lastBrushSize, regardless of current mode.
             _lastBrushSize = size;
 
-            if (_isEraser)
+            if (!_isEraser)
             {
-                // If we are in Eraser mode, we ALSO update Eraser size
-                _lastEraserSize = size;
-            }
-
-            if (_renderer != null)
-            {
-                _renderer.SetBrushSize(size);
+                _currentSize = size;
+                if (_renderer != null)
+                {
+                    _renderer.SetBrushSize(size);
+                }
             }
         }
 

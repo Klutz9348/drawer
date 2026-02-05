@@ -2,13 +2,15 @@ using System.Collections.Generic;
 using UnityEngine;
 using Features.Drawing.Domain.ValueObject;
 
+using Features.Drawing.Domain.Interface;
+
 namespace Features.Drawing.Service
 {
     /// <summary>
     /// Responsible for smoothing raw input points into high-quality curves.
     /// Uses Catmull-Rom spline interpolation.
     /// </summary>
-    public class StrokeSmoothingService
+    public class StrokeSmoothingService : IStrokeSmoothingService
     {
         private const int MinStepsPerSegment = 1;
         private const int MaxStepsPerSegment = 8;

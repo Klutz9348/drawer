@@ -1,12 +1,15 @@
 {
-    "name": "Drawing",
+    "name": "Features.Drawing.Editor",
     "rootNamespace": "",
     "references": [
-        "Common",
-        "Unity.TextMeshPro",
-        "Features.Drawing.Domain"
+        "Drawing",
+        "Features.Drawing.Presentation",
+        "Features.Drawing.Domain",
+        "Common"
     ],
-    "includePlatforms": [],
+    "includePlatforms": [
+        "Editor"
+    ],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": false,

@@ -43,6 +43,8 @@ namespace Features.Drawing.Domain
         public float EdgeSoftness = 0.05f;
 
         [Header("Input Processing")]
+        public bool EnableStabilizer = false;
+
         [Range(0f, 0.95f)]
         [Tooltip("Stabilization factor (0 = raw input, 0.9 = heavy smoothing/lag).")]
         public float StabilizationFactor = 0f;

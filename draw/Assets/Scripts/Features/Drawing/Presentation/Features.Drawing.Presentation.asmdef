@@ -1,10 +1,10 @@
 {
-    "name": "Drawing",
-    "rootNamespace": "",
+    "name": "Features.Drawing.Presentation",
     "references": [
+        "Drawing",
+        "Features.Drawing.Domain",
         "Common",
-        "Unity.TextMeshPro",
-        "Features.Drawing.Domain"
+        "Unity.TextMeshPro"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

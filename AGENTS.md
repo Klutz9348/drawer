@@ -37,12 +37,15 @@
 
 ```mermaid
 graph TD
-    Input[Input System] --> AppService
-    Net[Network Service] <--> AppService
+    Input[Input System] --> Facade
+    Net[Network Service] <--> Facade
+    DI[DrawingContext] -.-> Facade
+    DI -.-> RepoImpl
     
     subgraph "Application Layer"
-        AppService[DrawingAppService]
+        Facade[DrawingAppService]
         Cmd[Command System]
+        RepoImpl[LocalFileDrawingRepository]
     end
     
     subgraph "Service Layer"
@@ -54,7 +57,7 @@ graph TD
     
     subgraph "Domain Layer"
         Entity[Stroke / LogicPoint]
-        NetPacket[Network Packets]
+        Repo[IDrawingRepository]
         Rules[Business Rules]
     end
     
@@ -64,10 +67,12 @@ graph TD
         View[UI Views]
     end
 
-    AppService --> History
-    AppService --> Collision
-    AppService --> Renderer
-    AppService --> Network
+    Facade --> History
+    Facade --> Collision
+    Facade --> Renderer
+    Facade --> Network
+    Facade --> Repo
+    RepoImpl -- implements --> Repo
     Network --> Ghost
     History --> Cmd
     Cmd --> Renderer
@@ -82,7 +87,9 @@ graph TD
     *   **GhostOverlayRenderer**: 处理远程笔画的临时渲染。实现 `IGhostRenderer`。
     *   **规则**: 永远不要在这里放置业务逻辑。使用 **保留模式 (Retained Mode)**。必须通过 `IDrawingFacade` 与应用层通信。
 2.  **Application (App)**:
-    *   **DrawingAppService**: "大脑"。协调 Input -> Logic -> Rendering -> Network。实现 `IDrawingFacade`。
+    *   **DrawingContext (Composition Root)**: 负责依赖注入和组件装配。
+    *   **DrawingAppService**: "大脑"。协调 Input -> Logic -> Rendering -> Network -> Persistence。实现 `IDrawingFacade`。
+    *   **Data**: `LocalFileDrawingRepository` 实现数据持久化。
     *   **规则**: 管理 `TraceContext`。处理依赖注入。
 3.  **Service (Logic)**:
     *   **HistoryManager**: 管理撤销/重做堆栈。
@@ -91,6 +98,7 @@ graph TD
     *   **规则**: 尽可能无状态。负责繁重的计算。
 4.  **Domain (Core)**:
     *   **Entities**: POCOs (Plain Old C# Objects)。
+    *   **Interfaces**: 定义 `IDrawingRepository` 等核心接口。
     *   **Logic**: 纯数学逻辑 (例如 `StrokeStampGenerator`)。
     *   **规则**: **无 Unity 引擎依赖**（必要时除基本数学类型外）。
 

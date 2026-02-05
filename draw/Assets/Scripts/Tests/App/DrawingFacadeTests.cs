@@ -176,6 +176,7 @@ namespace Tests.App
             public bool SetBrushSizeCalled = false;
             public bool SetBrushColorCalled = false;
             public bool SetEraserCalled = false;
+            public bool StartStrokeCalled = false;
             public bool ClearCanvasCalled = false;
             public bool RestoreFromBackBufferCalled = false;
             
@@ -197,6 +198,11 @@ namespace Tests.App
             public void SetEraser(bool isEraser) 
             {
                 SetEraserCalled = true;
+            }
+
+            public void StartStroke(LogicPoint point, bool isEraser, float size, Color color)
+            {
+                StartStrokeCalled = true;
             }
             
             public void DrawPoints(System.Collections.Generic.IEnumerable<LogicPoint> points)

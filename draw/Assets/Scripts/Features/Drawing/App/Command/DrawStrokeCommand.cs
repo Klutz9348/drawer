@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using Features.Drawing.Domain;
 using Features.Drawing.Domain.Interface;
 using Features.Drawing.Domain.ValueObject;
+using Features.Drawing.Domain.Entity;
 using Features.Drawing.Service;
+using Common.Constants;
 
 namespace Features.Drawing.App.Command
 {
@@ -11,6 +13,7 @@ namespace Features.Drawing.App.Command
     {
         public string Id { get; }
         public long SequenceId { get; }
+        public StrokeEntity Stroke { get; } // Expose the original entity
         private readonly List<LogicPoint> _points;
         private readonly BrushStrategy _strategy;
         private readonly Texture2D _runtimeTexture;
@@ -21,22 +24,24 @@ namespace Features.Drawing.App.Command
         private readonly List<LogicPoint> _smoothingOutputBuffer;
         private readonly List<LogicPoint> _singlePointBuffer;
 
-        public DrawStrokeCommand(string id, long sequenceId, List<LogicPoint> points, BrushStrategy strategy, Texture2D runtimeTexture, Color color, float size, bool isEraser)
+        public DrawStrokeCommand(StrokeEntity stroke, BrushStrategy strategy, Texture2D runtimeTexture = null)
         {
-            Id = id;
-            SequenceId = sequenceId;
-            _points = new List<LogicPoint>(points); // Clone to ensure immutability
+            Id = stroke.Id.ToString();
+            SequenceId = stroke.SequenceId;
+            Stroke = stroke;
+            _points = new List<LogicPoint>(stroke.Points); // Clone to ensure immutability
             _strategy = strategy;
             _runtimeTexture = runtimeTexture;
-            _color = color;
-            _size = size;
-            _isEraser = isEraser;
+            _color = stroke.Color;
+            _size = stroke.Size;
+            _isEraser = stroke.BrushId == DrawingConstants.ERASER_BRUSH_ID;
+            
             _smoothingInputBuffer = new List<LogicPoint>(4);
             _smoothingOutputBuffer = new List<LogicPoint>(64);
             _singlePointBuffer = new List<LogicPoint>(1);
         }
 
-        public void Execute(IStrokeRenderer renderer, StrokeSmoothingService smoothingService)
+        public void Execute(IStrokeRenderer renderer, IStrokeSmoothingService smoothingService)
         {
             if (_isEraser)
             {
@@ -60,7 +65,7 @@ namespace Features.Drawing.App.Command
             renderer.EndStroke();
         }
 
-        private void DrawStrokePoints(IStrokeRenderer renderer, StrokeSmoothingService smoothingService)
+        private void DrawStrokePoints(IStrokeRenderer renderer, IStrokeSmoothingService smoothingService)
         {
             if (_points == null || _points.Count == 0) return;
 

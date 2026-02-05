@@ -350,9 +350,19 @@ namespace Features.Drawing.Presentation.UI
         {
             _currentSize = size;
             if (_drawingFacade == null) return;
+            
             _drawingFacade.SetSize(size);
-            UpdateSizeTabDisplay();
-            // Debug.Log($"Size set to: {size}");
+            
+            // If we are changing size, we imply we want to use the Brush (as Size is for Brush).
+            // So switch to Brush tab if not already there.
+            if (_isEraserMode)
+            {
+                SwitchTab(Tab.Brush);
+            }
+            else
+            {
+                UpdateSizeTabDisplay();
+            }
         }
 
         private void UpdateSizeTabDisplay()

@@ -13,7 +13,7 @@ namespace Features.Drawing.App.Command
             SequenceId = sequenceId;
         }
 
-        public void Execute(IStrokeRenderer renderer, StrokeSmoothingService smoothingService)
+        public void Execute(IStrokeRenderer renderer, IStrokeSmoothingService smoothingService)
         {
             renderer.ClearCanvas();
         }

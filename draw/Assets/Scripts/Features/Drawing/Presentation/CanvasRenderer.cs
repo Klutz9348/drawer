@@ -282,6 +282,17 @@ namespace Features.Drawing.Presentation
             _isEraser = isEraser;
         }
 
+        public void StartStroke(LogicPoint point, bool isEraser, float size, Color color)
+        {
+            SetEraser(isEraser);
+            if (!isEraser) SetBrushColor(color);
+            SetBrushSize(size);
+            
+            // Reset generator state for new stroke
+            if (_stampGenerator != null) _stampGenerator.Reset();
+            if (_useGpuStamping && _gpuStampGenerator != null) _gpuStampGenerator.Reset();
+        }
+
         /// <summary>
         /// Configures the brush appearance and behavior based on a Strategy object.
         /// </summary>

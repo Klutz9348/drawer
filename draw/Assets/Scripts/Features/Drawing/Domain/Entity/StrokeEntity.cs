@@ -19,6 +19,9 @@ namespace Features.Drawing.Domain.Entity
         // Color encoded as integer (RGBA) for simple serialization
         public uint ColorRGBA { get; private set; }
         
+        // Convenience property for Unity Color interaction
+        public UnityEngine.Color Color => Common.Utils.ColorPacking.ToColor(ColorRGBA);
+        
         // Sequence ID to track rendering order (higher means drawn later)
         public long SequenceId { get; private set; }
 
@@ -36,6 +39,15 @@ namespace Features.Drawing.Domain.Entity
             SequenceId = sequenceId;
             _points = new List<LogicPoint>();
             IsEnded = false;
+        }
+
+        public StrokeEntity(uint id, ushort authorId, ushort brushId, uint seed, UnityEngine.Color color, float size, long sequenceId = 0, IEnumerable<LogicPoint> points = null)
+            : this(id, authorId, brushId, seed, Common.Utils.ColorPacking.ToUInt(color), size, sequenceId)
+        {
+            if (points != null)
+            {
+                _points.AddRange(points);
+            }
         }
 
         public void AddPoints(IEnumerable<LogicPoint> newPoints)
