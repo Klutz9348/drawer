@@ -199,38 +199,39 @@ namespace Features.Drawing.Service
             // Ensure we are not in baking mode
             _renderer.SetBakingMode(false);
 
-            // 1. Determine start state
-            int startIndex = 0;
-            bool fullClear = false;
+            var fullHistory = GetFullHistory();
 
-            // Check if we have a ClearCanvasCommand in history
-            for (int i = _history.Count - 1; i >= 0; i--)
+            int startIndex = 0;
+            bool hasClear = false;
+
+            for (int i = fullHistory.Count - 1; i >= 0; i--)
             {
-                if (_history[i] is ClearCanvasCommand)
+                if (fullHistory[i] is ClearCanvasCommand)
                 {
-                    startIndex = i;
-                    fullClear = true;
+                    startIndex = i + 1;
+                    hasClear = true;
                     break;
                 }
             }
 
-            // 2. Prepare Canvas
-            if (fullClear)
+            if (hasClear)
             {
                 _renderer.ClearCanvas();
             }
-            else
+            else if (_archivedHistory.Count > 0)
             {
-                // This clears the active RT by copying the baked RT (which is clear or has baked strokes)
                 _renderer.RestoreFromBackBuffer();
             }
-            
-            Debug.Log($"[RedrawHistory] Replaying {_history.Count - startIndex} commands. StartIndex: {startIndex}");
-
-            // 3. Replay commands
-            for (int i = startIndex; i < _history.Count; i++)
+            else
             {
-                _history[i].Execute(_renderer, _smoothingService);
+                _renderer.ClearCanvas();
+            }
+
+            Debug.Log($"[RedrawHistory] Replaying {fullHistory.Count - startIndex} commands. StartIndex: {startIndex}");
+
+            for (int i = startIndex; i < fullHistory.Count; i++)
+            {
+                fullHistory[i].Execute(_renderer, _smoothingService);
             }
         }
     }
