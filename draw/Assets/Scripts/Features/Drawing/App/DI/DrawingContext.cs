@@ -1,7 +1,6 @@
 using UnityEngine;
 using Features.Drawing.Domain.Interface;
 using Features.Drawing.Service;
-using Features.Drawing.Service.Network;
 using Common.Diagnostics;
 using Features.Drawing.App.Data;
 using Features.Drawing.App.Input;
@@ -22,7 +21,6 @@ namespace Features.Drawing.App.DI
         [Header("Components")]
         [SerializeField] private DrawingAppService _appService;
         [SerializeField] private MonoBehaviour _rendererComponent;
-        [SerializeField] private DrawingNetworkService _networkService;
         
         [Header("Configuration")]
         [SerializeField] private bool _enableDiagnostics = true;
@@ -77,13 +75,10 @@ namespace Features.Drawing.App.DI
             var repository = new LocalFileDrawingRepository(repoPath);
             var persistence = new DrawingPersistenceService(repository, brushRegistry, logger);
 
-            // Network Service (Optional)
-            if (_networkService == null) _networkService = FindObjectOfType<DrawingNetworkService>();
-
             // Input Handler (Coordinator)
             var inputHandler = new StrokeInputHandler(
                 inputState, renderer, smoothing, collision, history, 
-                _networkService, brushRegistry, eraser, logger
+                brushRegistry, eraser, logger
             );
 
             // 3. Inject into AppService
@@ -98,32 +93,26 @@ namespace Features.Drawing.App.DI
                 logger
             );
             
-            // 4. Network Injection
-            if (_networkService != null)
-            {
-                _appService.SetNetworkService(_networkService);
-
-                // Inject GhostRenderer if needed
-                var ghostRenderer = FindObjectsOfType<MonoBehaviour>()
-                    .OfType<Features.Drawing.Domain.Interface.IGhostRenderer>()
-                    .FirstOrDefault();
-
-                if (ghostRenderer != null)
-                {
-                    _networkService.SetGhostRenderer(ghostRenderer);
-                }
-            }
-            
             Debug.Log("[DrawingContext] Dependencies Injected successfully.");
         }
 
         private IStrokeRenderer FindRenderer()
         {
-            var components = FindObjectsOfType<MonoBehaviour>();
-            foreach (var c in components)
+            // 1. Try GetComponent on self or children
+            var r = GetComponentInChildren<IStrokeRenderer>();
+            if (r != null) return r;
+
+            // 2. Try finding any global implementation
+            // Modified to avoid circular dependency on Presentation assembly
+            var allMonos = FindObjectsOfType<MonoBehaviour>();
+            foreach (var mono in allMonos)
             {
-                if (c is IStrokeRenderer r) return r;
+                if (mono is IStrokeRenderer renderer)
+                {
+                    return renderer;
+                }
             }
+
             return null;
         }
     }

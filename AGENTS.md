@@ -38,57 +38,70 @@
 
 ```mermaid
 graph TD
+    %% Infrastructure / External
     Input[Input System] --> Facade
     Net[Network Service] <--> Facade
     DI[DrawingContext] -.-> Facade
     DI -.-> RepoImpl
     
-    subgraph "Application Layer"
+    subgraph "Presentation Layer (表现层)"
+        Renderer[CanvasRenderer]
+        Ghost[GhostOverlayRenderer]
+        View[UI Views]
+    end
+
+    subgraph "Application Layer (应用服务层)"
         Facade[DrawingAppService]
         Cmd[Command System]
         RepoImpl[LocalFileDrawingRepository]
     end
     
-    subgraph "Service Layer"
+    subgraph "Service Layer (领域服务/逻辑层)"
         History[HistoryManager]
         Collision[CollisionService]
         Smooth[SmoothingService]
         Network[DrawingNetworkService]
     end
     
-    subgraph "Domain Layer"
+    subgraph "Domain Layer (核心领域层)"
         Entity[Stroke / LogicPoint]
         Repo[IDrawingRepository]
         Rules[Business Rules]
     end
     
-    subgraph "Presentation Layer"
-        Renderer[CanvasRenderer]
-        Ghost[GhostOverlayRenderer]
-        View[UI Views]
-    end
-
+    %% Dependencies (Strictly Downwards)
     Facade --> History
     Facade --> Collision
     Facade --> Renderer
     Facade --> Network
     Facade --> Repo
+    
+    %% Implementation
     RepoImpl -- implements --> Repo
+    
+    %% Cross-Cutting
     Network --> Ghost
     History --> Cmd
     Cmd --> Renderer
     Renderer -.-> Entity
 ```
 
+**分层依赖规则**:
+1.  **Presentation** (UI/View) -> **Application** (Facade/AppService)
+2.  **Application** -> **Service** (Domain Services) & **Domain** (Entities/Interfaces)
+3.  **Service** -> **Domain**
+4.  **Infrastructure** (Data Impl) -> **Domain** (Interfaces) [依赖倒置]
+5.  ❌ **禁止逆向依赖** (例如: Domain 引用 Application，Service 引用 Presentation)
+
 ### 3.2 层级职责
 
 1.  **Presentation (Unity)**:
-    *   **CanvasRenderer**: 处理 `CommandBuffer`, `Mesh`, `Material`。**纯视觉表现**。实现 `IStrokeRenderer` 和 `ICanvasResolutionProvider`。使用 **Mesh Stamping** 技术进行绘制。
+    *   **CanvasRenderer**: 处理 `CommandBuffer`, `Mesh`, `Material`。**纯视觉表现**。实现 `IStrokeRenderer` 和 `ICanvasResolutionProvider`。使用 **Mesh Stamping** 技术进行绘制。支持异步初始化 (`InitializeAsync`) 以预热资源。
     *   **CanvasLayoutController**: 管理分辨率/宽高比和 RenderTextures（与 Renderer 分离）。
     *   **GhostOverlayRenderer**: 处理远程笔画的临时渲染。实现 `IGhostRenderer`。
     *   **规则**: 永远不要在这里放置业务逻辑。使用 **保留模式 (Retained Mode)**。必须通过 `IDrawingFacade` 与应用层通信。
 2.  **Application (App)**:
-    *   **DrawingContext (Composition Root)**: 负责依赖注入和组件装配。
+    *   **DrawingContext (Composition Root)**: 负责依赖注入和组件装配。**必须**通过此组件启动应用，不再支持 Fallback 初始化。
     *   **DrawingAppService**: "大脑"。协调 Input -> Logic -> Rendering -> Network -> Persistence。实现 `IDrawingFacade`。
     *   **Data**: `LocalFileDrawingRepository` 实现数据持久化。
     *   **规则**: 管理 `TraceContext`。处理依赖注入。
@@ -117,8 +130,8 @@ graph TD
 ### 4.2 CanvasRenderer (画师)
 *   **职责**: GPU 加速渲染，使用 Mesh Stamping 技术。
 *   **优化**:
-    *   **初始化**: 使用显式 `Initialize()` 方法（同步）。无协程。
-    *   **Shader 预热**: 在 `InitializeGraphics` 中使用 `ShaderVariantCollection` 以防止第一笔卡顿。
+    *   **初始化**: 使用显式 `InitializeAsync()` 方法（异步协程）。支持 Shader 变体预热和计算着色器加载。
+    *   **Shader 预热**: 在 `InitializeAsync` 中使用 `ShaderVariantCollection` 以防止第一笔卡顿。
     *   **资源清理**: 在 `OnDestroy` 中显式销毁 Materials/Meshes。
     *   **状态重置**: 依赖 `StartStroke` 来重置内部的 `StrokeStampGenerator` 状态，确保插值正确。
 
@@ -152,12 +165,15 @@ graph TD
 ### 5.1 性能规则 (严格)
 1.  **零分配 (Zero Allocation)**:
     *   ❌ 在 `Update` 或 `MoveStroke` 中 `new List<T>()`。
-    *   ✅ 使用预分配的 `private List<T> _buffer`。
+    *   ✅ 使用预分配的 `private readonly List<T> _buffer` 并配合 `Clear()`。
+    *   ✅ 确保热路径（如碰撞检测、绘图循环）中不产生 GC。
 2.  **字符串拼接**:
     *   ❌ 在日志/循环中 `string + string`。
     *   ✅ 使用 `StringBuilder` 或结构化日志。
 3.  **循环优化**:
     *   在热路径（绘图循环）中优先使用 `for` 而不是 `foreach`。
+4.  **异步初始化**:
+    *   ✅ 涉及资源加载（Shader/Texture）的初始化必须是异步的 (`IEnumerator`/`Task`)，避免阻塞主线程。
 
 ### 5.2 编码标准
 1.  **依赖注入**:
@@ -206,68 +222,257 @@ graph TD
 
 设计一个优秀软件项目架构时应遵循的核心架构原则和技术规范：
 
-### 8.1 基础架构原则
-1.  **分层架构原则**
-    *   采用清晰的分层结构（表现层、业务逻辑层、数据访问层、基础设施层）。
-    *   各层之间通过定义良好的接口进行解耦，避免跨层直接依赖。
-    *   实现依赖倒置原则，高层模块不依赖低层模块的具体实现。
-2.  **单一职责原则（SRP）**
-    *   每个模块、类、函数只负责一个明确的职责。
-    *   避免功能耦合，确保代码的可维护性和可测试性。
-    *   建立清晰的模块边界和职责划分文档。
-3.  **开闭原则（OCP）**
-    *   架构设计应对扩展开放，对修改关闭。
-    *   通过抽象、接口、策略模式等机制实现可扩展性。
-    *   建立插件化架构，支持新功能的动态添加。
-4.  **依赖注入和控制反转（IoC/DI）**
-    *   实现松耦合的组件依赖关系。
-    *   使用依赖注入框架管理对象生命周期。
-    *   建立统一的配置管理机制。
+### 8.1 基础架构原则 (新增补充)
+1.  **分层架构原则 (Layered Architecture)**
+    *   **表现层 (Presentation)**: 负责 UI 渲染与用户交互 (Unity Components)。
+    *   **应用服务层 (Application)**: 协调业务流程，不包含核心业务规则 (AppService)。
+    *   **领域层 (Domain)**: 包含核心实体、值对象与业务规则，**无外部依赖**。
+    *   **基础设施层 (Infrastructure)**: 实现持久化、网络等具体技术细节。
+    *   *约束*: 跨层调用必须通过显式接口 (Port-Adapter/Dependency Injection)，严禁跨层直接实例化具体类。
+2.  **单一职责原则 (SRP)**
+    *   每个类/模块仅有一个变更原因。
+    *   *检测*: 类行数 > 400 行或依赖注入 > 7 个通常违反 SRP。
+3.  **依赖倒置原则 (DIP)**
+    *   高层模块不应依赖低层模块，二者都应依赖抽象。
+    *   *实践*: 所有的 Service 和 Repository 必须定义 Interface。
+4.  **接口隔离原则 (ISP)**
+    *   客户端不应被迫依赖它们不使用的方法。
+    *   *实践*: 将大接口拆分为特定的 `IReader`, `IWriter`, `IRenderer`。
+5.  **可观测性原则 (Observability)**
+    *   系统必须通过日志 (Logging)、指标 (Metrics)、追踪 (Tracing) 暴露内部状态。
+    *   *强制*: 关键业务流程 (Start/End Stroke, Save/Load) 必须产生带有 `TraceId` 的结构化日志。
 
-### 8.2 业务与领域
-5.  **领域驱动设计（DDD）**
+### 8.2 依赖边界检查 (自动阻断)
+
+为防止架构腐化，CI 阶段需运行架构检查。
+
+**Unity/C# 架构检查 (ArchUnitNET 示例)**:
+```csharp
+// ArchitectureTests.cs
+[Test]
+public void Domain_Layer_Should_Not_Depend_On_Presentation()
+{
+    // Define Layers
+    var domainLayer = Types.InNamespace("Features.Drawing.Domain");
+    var presentationLayer = Types.InNamespace("Features.Drawing.Presentation");
+
+    // Rule
+    var rule = Types().That().Are(domainLayer)
+        .Should().NotDependOnAny(presentationLayer);
+
+    rule.Check(Architecture);
+}
+```
+
+**(Web/TS 模块适用) Dependency Cruiser 配置**:
+```javascript
+// .dependency-cruiser.js
+module.exports = {
+  forbidden: [
+    {
+      name: 'no-domain-to-presentation',
+      severity: 'error',
+      from: { path: "^src/domain" },
+      to: { path: "^src/presentation" }
+    }
+  ]
+};
+```
+
+### 8.3 业务与领域
+6.  **领域驱动设计（DDD）**
     *   以业务领域为核心进行架构设计。
     *   建立统一的领域模型和通用语言。
     *   划分限界上下文，管理复杂业务逻辑。
-6.  **微服务/模块化架构原则**
+7.  **微服务/模块化架构原则**
     *   服务/模块拆分遵循业务边界。
     *   实现服务/模块间的松耦合和高内聚。
     *   建立服务发现、配置管理、监控告警等基础设施（针对分布式场景）。
 
-### 8.3 数据与安全
-7.  **数据架构原则**
+### 8.4 数据与安全
+8.  **数据架构原则**
     *   实现数据一致性策略（最终一致性或强一致性）。
     *   建立数据访问抽象层，支持多数据源。
     *   实现数据缓存策略，提升系统性能。
-8.  **安全架构原则**
+9.  **安全架构原则**
     *   实现多层次安全防护（认证、授权、加密、审计）。
     *   遵循最小权限原则。
     *   建立安全漏洞扫描和修复机制。
 
-### 8.4 性能与可靠性
-9.  **性能架构原则**
+### 8.5 性能与可靠性
+10. **性能架构原则**
     *   实现水平扩展能力。
     *   建立性能监控和调优机制。
     *   设计合理的缓存策略和异步处理机制。
-10. **可观测性原则**
+11. **可观测性原则** (详见 8.1)
     *   实现完整的日志、指标、链路追踪体系。
     *   建立统一的监控告警平台。
     *   支持快速问题定位和性能分析。
-11. **容错和弹性设计**
+12. **容错和弹性设计**
     *   实现熔断、限流、重试等容错机制。
     *   设计优雅降级策略。
     *   建立健康检查和自动恢复机制。
 
-### 8.5 工程实践
-12. **技术债务管理**
+### 8.6 工程实践
+13. **技术债务管理**
     *   建立代码质量门禁和自动化检查。
     *   定期进行架构评审和重构。
     *   维护架构决策记录（ADR）。
-13. **交付和部署原则**
+14. **交付和部署原则**
     *   实现自动化构建、测试、部署流水线。
     *   支持蓝绿部署、滚动升级等策略。
     *   建立环境一致性和配置管理机制。
-14. **文档和知识管理**
+15. **文档和知识管理**
     *   维护完整的架构文档、API文档、部署文档。
     *   建立知识库和最佳实践指南。
     *   定期进行团队架构培训和技术分享。
+
+## 9. AI 行为规范 (新增)
+
+为确保 AI Agent 在项目中的行为可控、安全且高效，必须遵循以下规范。
+
+### 9.1 输入与输出校验
+*   **输入合法性校验**:
+    *   所有外部输入（用户 Prompt、文件内容）必须经过预处理。
+    *   **技术方案**: 使用 Regex 白名单过滤非法字符；对代码文件路径进行 `Path.GetFullPath` 校验防止目录遍历。
+*   **输出格式强制校验**:
+    *   AI 生成的结构化数据（JSON/YAML）必须通过 Schema 校验。
+    *   **技术方案**:
+        ```json
+        // JSON Schema 示例
+        {
+          "type": "object",
+          "properties": {
+            "code": { "type": "string" },
+            "explanation": { "type": "string" }
+          },
+          "required": ["code", "explanation"]
+        }
+        ```
+    *   **指标**: Schema 校验失败率 < 1%。
+
+### 9.2 敏感信息与安全
+*   **敏感信息过滤**:
+    *   严禁在 Prompt 或 Log 中包含 API Key、Password、PII (个人身份信息)。
+    *   **技术方案**: 在发送给 LLM 前运行 PII 扫描器（如 `presidio-analyzer` 或正则匹配 `sk-[a-zA-Z0-9]{48}`）。
+*   **幻觉检测与纠正**:
+    *   对于事实性陈述（如 API 参数），必须进行“事实核查”。
+    *   **技术方案**: RAG (检索增强生成) —— 先检索本地 `AGENTS.md` 或代码库，将检索结果作为上下文注入。
+    *   **指标**: 幻觉率 (Hallucination Rate) ≤ 0.5%。
+
+### 9.3 熔断与重试策略
+*   **重试机制**:
+    *   遇到 429 (Rate Limit) 或 5xx 错误时，执行指数退避重试 (Exponential Backoff)。
+    *   **策略**: Initial Delay 1s, Multiplier 2x, Max Retries 3。
+*   **熔断机制**:
+    *   当错误率在 1 分钟内超过 10% 时，触发熔断，降级为“安全模式”或暂停服务 30 秒。
+    *   **指标**: P99 响应时间 ≤ 800 ms (针对轻量级交互)。
+
+## 10. 代码质量门禁 (新增附录)
+
+任何代码合并至主干 (main/develop) 前，必须通过以下自动化门禁。
+
+### 10.1 强制门禁 (Blocking)
+
+1.  **静态代码分析 (Linting)**:
+    *   **Unity/C#**: 无 Error 级别的 Roslyn Analyzer 警告 (StyleCop)。
+    *   **TS/Web**: `ESLint@latest` + `@typescript-eslint/recommended` (无 Error)。
+    *   **配置示例**:
+        ```yaml
+        # .github/workflows/lint.yml
+        steps:
+          - name: Lint C#
+            run: dotnet format --verify-no-changes
+          - name: Lint TS
+            run: npm run lint
+        ```
+2.  **代码格式化**:
+    *   **C#**: `dotnet format` / `CSharpier`。
+    *   **TS/JSON/MD**: `Prettier`。
+3.  **Commit 信息规范**:
+    *   必须符合 [Conventional Commits](https://www.conventionalcommits.org/) (feat, fix, docs, style, refactor, test, chore)。
+    *   **校验**: `commitlint`。
+4.  **单元测试覆盖率**:
+    *   行覆盖率 (Line Coverage) ≥ 90%。
+    *   分支覆盖率 (Branch Coverage) ≥ 80%。
+    *   **工具**: Unity Test Runner (OpenCover/CodeCoverage package)。
+5.  **变异测试 (Mutation Testing)**:
+    *   Mutation Score ≥ 80% (可选，核心算法模块强制)。
+    *   **工具**: Stryker.NET。
+
+### 10.2 推荐门禁 (Recommended)
+
+1.  **代码质量阈 (SonarQube)**:
+    *   New Bugs = 0
+    *   New Vulnerabilities = 0
+    *   Code Smell Density < 1%
+2.  **性能基准测试**:
+    *   关键路径 (如 `DrawPoints`) 耗时回归 ≤ 5%。
+3.  **依赖漏洞扫描**:
+    *   High/Critical Vulnerabilities = 0。
+    *   **工具**: `Snyk` 或 `OSV-Scanner`。
+
+### 10.3 本地预提交钩子 (Local Hooks)
+
+在 `.husky/pre-commit` 中配置：
+
+```bash
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+# 1. 静态检查
+npx lint-staged
+
+# 2. 运行相关单元测试 (受影响的文件)
+# dotnet test --filter "FullyQualifiedName~ChangedNamespace"
+
+# 3. 检查 Commit Msg (commit-msg hook)
+# npx --no -- commitlint --edit ${1}
+```
+
+**lint-staged 配置 (package.json)**:
+```json
+{
+  "lint-staged": {
+    "*.cs": ["dotnet format", "git add"],
+    "*.{ts,js,json,md}": ["prettier --write", "eslint --fix", "git add"]
+  }
+}
+```
+
+### 10.4 CI 流水线示例 (GitHub Actions)
+
+```yaml
+name: Quality Gate
+on: [push, pull_request]
+
+jobs:
+  quality-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      # 1. Setup
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '6.0.x'
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        
+      # 2. Linting & Formatting
+      - name: Check Format (C#)
+        run: dotnet format --verify-no-changes
+      - name: Check Lint (TS)
+        run: npm ci && npm run lint
+        
+      # 3. Testing
+      - name: Run Tests
+        run: dotnet test --collect:"XPlat Code Coverage"
+        
+      # 4. Vulnerability Scan
+      - name: Snyk Security Scan
+        uses: snyk/actions/dotnet@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+```

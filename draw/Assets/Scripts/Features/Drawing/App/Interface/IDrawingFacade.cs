@@ -1,5 +1,6 @@
 using UnityEngine;
 using Features.Drawing.Domain;
+using Features.Drawing.Domain.ValueObject;
 
 namespace Features.Drawing.App.Interface
 {
@@ -14,6 +15,8 @@ namespace Features.Drawing.App.Interface
 
         void Undo();
         void Redo();
+
+        void StartStroke(LogicPoint point, int authorId);
         void ClearCanvas();
         void SetBrushStrategy(BrushStrategy strategy, Texture2D runtimeTexture = null);
         void SetColor(Color color);

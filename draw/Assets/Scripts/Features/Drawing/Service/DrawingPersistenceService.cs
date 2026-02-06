@@ -11,7 +11,7 @@ using Features.Drawing.Domain;
 
 namespace Features.Drawing.Service
 {
-    public class DrawingPersistenceService
+    public class DrawingPersistenceService : IDrawingPersistenceService
     {
         private readonly IDrawingRepository _repository;
         private readonly IBrushRegistry _brushRegistry;

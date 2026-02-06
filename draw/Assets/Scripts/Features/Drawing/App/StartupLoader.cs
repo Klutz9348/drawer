@@ -46,10 +46,6 @@ namespace Features.Drawing.App
             // Assuming standard brushes are in a known path or referenced
             // Since we don't have a direct list, we might rely on what's referenced in the scene.
             
-            // 3. ShaderVariantCollection (if available)
-            // var variants = Resources.Load<ShaderVariantCollection>("Shaders/DrawingVariants");
-            // if (variants != null) variants.WarmUp();
-            
             Debug.Log("[StartupLoader] Resources pre-warmed.");
         }
     }

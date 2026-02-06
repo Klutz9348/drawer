@@ -143,7 +143,6 @@ namespace Features.Drawing.Presentation
                      EndStroke();
                 }
                 return;
-                return;
             }
 
             if (isDown)

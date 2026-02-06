@@ -10,6 +10,7 @@ using UnityEngine.UI;
 
 namespace Common.Diagnostics.UI
 {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
     public class LogPanelController : MonoBehaviour
     {
         [Header("Settings")]
@@ -695,4 +696,5 @@ namespace Common.Diagnostics.UI
             Debug.Log($"Logs exported to: {path}");
         }
     }
+#endif
 }

@@ -10,7 +10,7 @@ namespace Features.Drawing.Service
     /// Manages the command history, undo/redo stacks, and synchronization state.
     /// Extracted from DrawingAppService to separate concerns.
     /// </summary>
-    public class DrawingHistoryManager
+    public class DrawingHistoryManager : IDrawingHistoryManager
     {
         // State
         private List<ICommand> _history = new List<ICommand>();
@@ -64,18 +64,46 @@ namespace Features.Drawing.Service
             _archivedHistory.Clear();
             _activeStrokeIds.Clear();
 
-            // We treat all loaded commands as "Active" initially for simplicity,
-            // or we could split them if we want to enforce the limit immediately.
-            // For now, let's just add them.
+            if (newHistory == null || newHistory.Count == 0) return;
+
+            // Bulk Load Strategy:
+            // 1. Archive everything except the last 50 commands.
+            // 2. Add last 50 to active history.
+            // 3. Bake the archived commands efficiently.
             
-            // I'll implement ReplaceHistory to AddCommand (which handles baking/archiving) AND ensure the remaining active ones are drawn.
-            
-            foreach (var cmd in newHistory)
+            int total = newHistory.Count;
+            int activeCount = Mathf.Min(total, 50);
+            int archiveCount = total - activeCount;
+
+            // Phase 1: Archive & Bake
+            if (archiveCount > 0)
             {
-                AddCommand(cmd);
+                if (_renderer != null) _renderer.SetBakingMode(true);
+                
+                for (int i = 0; i < archiveCount; i++)
+                {
+                    var cmd = newHistory[i];
+                    _archivedHistory.Add(cmd);
+                    // Bake
+                    if (_renderer != null)
+                    {
+                        cmd.Execute(_renderer, _smoothingService);
+                    }
+                }
+                
+                if (_renderer != null) _renderer.SetBakingMode(false);
+            }
+
+            // Phase 2: Active History
+            for (int i = archiveCount; i < total; i++)
+            {
+                var cmd = newHistory[i];
+                _history.Add(cmd);
+                _activeStrokeIds.Add(cmd.Id);
             }
             
-            // Draw the active ones
+            // Phase 3: Draw Active Commands (Visual Refresh)
+            // We only need to draw the active ones because archived ones are already baked into the background.
             foreach (var cmd in _history)
             {
                 cmd.Execute(_renderer, _smoothingService);

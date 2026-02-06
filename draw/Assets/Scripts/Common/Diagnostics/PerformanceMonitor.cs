@@ -8,6 +8,7 @@ namespace Common.Diagnostics
     /// Monitors system performance metrics (FPS, Memory).
     /// Designed to be non-intrusive and efficient.
     /// </summary>
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
     public class PerformanceMonitor : MonoBehaviour
     {
         private IStructuredLogger _logger;
@@ -84,4 +85,5 @@ namespace Common.Diagnostics
             }
         }
     }
+#endif
 }

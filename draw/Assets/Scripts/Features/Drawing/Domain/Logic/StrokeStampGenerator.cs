@@ -48,13 +48,15 @@ namespace Features.Drawing.Domain.Logic
             _lastSize = 0f;
         }
 
-        public void ProcessPoints(IEnumerable<LogicPoint> points, float brushSize, List<StampData> outputBuffer)
+        public void ProcessPoints(List<LogicPoint> points, float brushSize, List<StampData> outputBuffer)
         {
             if (outputBuffer == null) return;
             outputBuffer.Clear();
 
-            foreach (var p in points)
+            // Optimization: Use for loop to avoid enumerator allocation
+            for (int i = 0; i < points.Count; i++)
             {
+                var p = points[i];
                 // Position mapping
                 float x = p.X * _scaleX;
                 float y = p.Y * _scaleY;

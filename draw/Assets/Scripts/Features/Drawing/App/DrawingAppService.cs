@@ -8,6 +8,7 @@ using Features.Drawing.Domain.Entity;
 using Common.Constants;
 using Features.Drawing.App.Command;
 using Features.Drawing.App.Interface;
+using Features.Drawing.App.Data;
 using Features.Drawing.App.State;
 using Features.Drawing.App.Input;
 using Common.Diagnostics;
@@ -27,8 +28,8 @@ namespace Features.Drawing.App
         [SerializeField] private BrushStrategy _eraserStrategy; 
         [SerializeField] private BrushStrategy[] _registeredBrushes; 
         
-        [Header("Diagnostics")]
-        [SerializeField] private bool _enableDiagnostics = true;
+        // [Header("Diagnostics")]
+        // [SerializeField] private bool _enableDiagnostics = true;
 
         // Exposed for Context to read
         public BrushStrategy EraserStrategy => _eraserStrategy;
@@ -37,14 +38,16 @@ namespace Features.Drawing.App
         // Services
         private InputStateManager _inputState;
         private StrokeInputHandler _strokeInputHandler;
-        private DrawingPersistenceService _persistenceService;
+        private IDrawingPersistenceService _persistenceService;
         private IBrushRegistry _brushRegistryService;
-        private DrawingHistoryManager _historyManager;
+        private IDrawingHistoryManager _historyManager;
         private IStrokeRenderer _renderer;
         private IStrokeSmoothingService _smoothingService;
         private IStructuredLogger _logger;
-        private Features.Drawing.Service.Network.DrawingNetworkService _networkService;
 
+        private int _lastUndoFrame = -1;
+        private int _lastRedoFrame = -1;
+        
         // Public Accessors for UI/Preview
         public bool IsEraser => _inputState?.IsEraser ?? false;
         public float CurrentSize => _inputState?.CurrentSize ?? 10f;
@@ -69,52 +72,39 @@ namespace Features.Drawing.App
 
             if (!_isInitialized)
             {
-                // Fallback: If not initialized by Context (e.g. standalone test scene), try to self-initialize
-                Debug.LogWarning("[DrawingAppService] Not initialized via Context. Attempting fallback initialization.");
-                
-                if (_concreteRenderer == null) _concreteRenderer = FindRendererComponent();
-                var renderer = _concreteRenderer as IStrokeRenderer;
-                
-                if (renderer != null)
-                {
-                    if (renderer is IRendererInitializer initializer)
-                    {
-                        yield return initializer.InitializeAsync();
-                    }
+                TryInitializeFallback();
+            }
 
-                    // Create minimal dependencies for fallback
-                    var logger = _enableDiagnostics ? new StructuredLogger("DrawingApp", 10, true) : null;
-                    var brushRegistry = new BrushRegistryService(_registeredBrushes, _eraserStrategy);
-                    var inputState = new InputStateManager(renderer, _eraserStrategy);
-                    var smoothing = new StrokeSmoothingService();
-                    var collision = new StrokeCollisionService();
-                    var history = new DrawingHistoryManager(renderer, smoothing, collision);
-                    // Persistence is optional/null in fallback
-                    
-                    var inputHandler = new StrokeInputHandler(
-                        inputState, renderer, smoothing, collision, history, 
-                        null, brushRegistry, _eraserStrategy, logger
-                    );
+            // CRITICAL: Ensure Renderer is initialized (Async) regardless of injection method
+            // This was previously missing in the DI path
+            if (_renderer is IRendererInitializer initializer)
+            {
+                yield return initializer.InitializeAsync();
+            }
 
-                    Initialize(renderer, inputState, inputHandler, null, brushRegistry, history, smoothing, logger);
-                }
+            if (!_isInitialized)
+            {
+                Debug.LogWarning("[DrawingAppService] Initialization incomplete. Ensure an IStrokeRenderer is present or add DrawingContext.");
             }
         }
 
         private void Awake()
         {
+            // Application-level Camera Setup
+            if (Camera.main != null)
+            {
+                Camera.main.backgroundColor = Color.white;
+                Camera.main.clearFlags = CameraClearFlags.SolidColor;
+            }
+
             if (Application.platform == RuntimePlatform.IPhonePlayer && !Debug.isDebugBuild)
             {
-                _enableDiagnostics = false;
+                // _enableDiagnostics = false;
             }
         }
 
         private void OnDestroy()
         {
-            if (_networkService != null)
-            {
-                _networkService.OnRemoteStrokeCommitted -= CommitRemoteStroke;
-            }
         }
 
         /// <summary>
@@ -124,9 +114,9 @@ namespace Features.Drawing.App
             IStrokeRenderer renderer,
             InputStateManager inputState,
             StrokeInputHandler strokeInputHandler,
-            DrawingPersistenceService persistenceService,
+            IDrawingPersistenceService persistenceService,
             IBrushRegistry brushRegistry,
-            DrawingHistoryManager historyManager,
+            IDrawingHistoryManager historyManager,
             IStrokeSmoothingService smoothingService,
             IStructuredLogger logger = null)
         {
@@ -151,17 +141,6 @@ namespace Features.Drawing.App
             {
                 resolutionProvider.OnResolutionChanged += UpdateResolutionRatio;
                 UpdateResolutionRatio(resolutionProvider.Resolution);
-            }
-        }
-
-        public void SetNetworkService(Features.Drawing.Service.Network.DrawingNetworkService networkService)
-        {
-            _networkService = networkService;
-            if (_networkService != null)
-            {
-                // Subscribe to network events
-                _networkService.OnRemoteStrokeCommitted += CommitRemoteStroke;
-                _networkService.InitializeBrushRegistry(this);
             }
         }
 
@@ -199,17 +178,43 @@ namespace Features.Drawing.App
             _historyManager?.AddCommand(cmd);
         }
 
-        public void Undo() => _historyManager?.Undo();
-        public void Redo() => _historyManager?.Redo();
+        public void Undo()
+        {
+            if (Time.frameCount == _lastUndoFrame) return;
+            _lastUndoFrame = Time.frameCount;
+            _historyManager?.Undo();
+        }
+
+        public void Redo()
+        {
+            if (Time.frameCount == _lastRedoFrame) return;
+            _lastRedoFrame = Time.frameCount;
+            _historyManager?.Redo();
+        }
 
         // --- Input Handling (Delegated) ---
 
+        public void RegisterStrokeListener(IStrokeEventListener listener)
+        {
+            _strokeInputHandler?.RegisterListener(listener);
+        }
+
+        public void UnregisterStrokeListener(IStrokeEventListener listener)
+        {
+            _strokeInputHandler?.UnregisterListener(listener);
+        }
+
         public void StartStroke(LogicPoint point)
+        {
+            StartStroke(point, 0); // Default to local author
+        }
+
+        public void StartStroke(LogicPoint point, int authorId)
         {
             // Notify listeners (e.g. UI to close panels)
             OnStrokeStarted?.Invoke();
             
-            _strokeInputHandler?.StartStroke(point, _nextSequenceId++);
+            _strokeInputHandler?.StartStroke(point, _nextSequenceId++, authorId);
         }
 
         public void MoveStroke(LogicPoint point)
@@ -281,6 +286,61 @@ namespace Features.Drawing.App
             return null;
         }
 
+        private bool TryInitializeFallback()
+        {
+            if (_isInitialized) return true;
+
+            IStrokeRenderer renderer = null;
+            if (_concreteRenderer != null && _concreteRenderer is IStrokeRenderer concrete)
+            {
+                renderer = concrete;
+            }
+            else
+            {
+                var resolved = FindRendererComponent();
+                if (resolved != null)
+                {
+                    renderer = resolved as IStrokeRenderer;
+                }
+            }
+
+            if (renderer == null) return false;
+
+            var eraser = _eraserStrategy;
+            var brushes = _registeredBrushes ?? new BrushStrategy[0];
+            var brushRegistry = new BrushRegistryService(brushes, eraser);
+            var inputState = new InputStateManager(renderer, eraser);
+            var smoothing = new StrokeSmoothingService();
+            var collision = new StrokeCollisionService();
+            var history = new DrawingHistoryManager(renderer, smoothing, collision);
+            var repoPath = System.IO.Path.Combine(Application.persistentDataPath, "Sessions");
+            var repository = new LocalFileDrawingRepository(repoPath);
+            var persistence = new DrawingPersistenceService(repository, brushRegistry, null);
+            var inputHandler = new StrokeInputHandler(
+                inputState,
+                renderer,
+                smoothing,
+                collision,
+                history,
+                brushRegistry,
+                eraser,
+                null
+            );
+
+            Initialize(
+                renderer,
+                inputState,
+                inputHandler,
+                persistence,
+                brushRegistry,
+                history,
+                smoothing,
+                null
+            );
+
+            return _isInitialized;
+        }
+
         private void UpdateResolutionRatio(Vector2Int resolution)
         {
             float maxDim = Mathf.Max(resolution.x, resolution.y);
@@ -292,18 +352,6 @@ namespace Features.Drawing.App
             }
 
             _strokeInputHandler?.SetLogicToWorldRatio(ratio);
-        }
-
-        private void CommitRemoteStroke(StrokeEntity stroke)
-        {
-            // Reconstruct command from entity
-            var strategy = GetBrushStrategy(stroke.BrushId);
-            if (strategy != null)
-            {
-                var cmd = new DrawStrokeCommand(stroke, strategy);
-                cmd.Execute(_renderer, _smoothingService);
-                _historyManager?.AddCommand(cmd);
-            }
         }
     }
 }

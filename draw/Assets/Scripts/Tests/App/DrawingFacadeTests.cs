@@ -23,12 +23,34 @@ namespace Tests.App
             _appService = _testObject.AddComponent<DrawingAppService>();
             _mockRenderer = _testObject.AddComponent<MockStrokeRenderer>();
 
-            // Inject Renderer
-            var field = typeof(DrawingAppService).GetField("_concreteRenderer", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            if (field != null)
-            {
-                field.SetValue(_appService, _mockRenderer);
-            }
+            // Minimal DI Setup for Testing
+            var eraserStrategy = ScriptableObject.CreateInstance<BrushStrategy>(); // Dummy
+            var brushes = new BrushStrategy[0];
+            var brushRegistry = new Features.Drawing.Service.BrushRegistryService(brushes, eraserStrategy);
+            var inputState = new Features.Drawing.App.State.InputStateManager(_mockRenderer, eraserStrategy);
+            
+            var smoothing = new Features.Drawing.Service.StrokeSmoothingService();
+            var collision = new Features.Drawing.Service.StrokeCollisionService();
+            var history = new Features.Drawing.Service.DrawingHistoryManager(_mockRenderer, smoothing, collision);
+            
+            var logger = new Common.Diagnostics.StructuredLogger("Test", 0, false);
+            
+            var inputHandler = new Features.Drawing.App.Input.StrokeInputHandler(
+                inputState, _mockRenderer, smoothing, collision, history, 
+                brushRegistry, eraserStrategy, logger
+            );
+
+            // Inject via Initialize
+            _appService.Initialize(
+                _mockRenderer,
+                inputState,
+                inputHandler,
+                null, // Persistence not needed for these tests
+                brushRegistry,
+                history,
+                smoothing,
+                logger
+            );
         }
 
         [TearDown]

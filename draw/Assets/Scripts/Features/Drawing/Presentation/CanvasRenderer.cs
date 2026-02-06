@@ -31,7 +31,7 @@ namespace Features.Drawing.Presentation
         [SerializeField] private bool _isEraser = false;
         [SerializeField] private float _brushOpacity = 1.0f; // 0-1
         [SerializeField] private BrushRotationMode _rotationMode = BrushRotationMode.None;
-        [SerializeField] private bool _enableDiagnostics = true;
+        [SerializeField] private bool _enableDiagnostics = false;
 
         // Size Management
         private float _baseBrushSize = 50.0f; // Raw size from logic
@@ -73,13 +73,6 @@ namespace Features.Drawing.Presentation
 
         private void Awake()
         {
-            // Fix background color (User requirement: White, not Blue)
-            if (Camera.main != null)
-            {
-                Camera.main.backgroundColor = Color.white;
-                Camera.main.clearFlags = CameraClearFlags.SolidColor;
-            }
-
             // Note: Removed coroutine initialization. 
             // Now relies on explicit Initialize() call from AppService or Bootstrapper.
         }
@@ -89,8 +82,19 @@ namespace Features.Drawing.Presentation
             if (_isInitialized) yield break;
 
             // 1. GPU Generator (Compute Shader)
-            InitializeGpuGenerator();
-            yield return null; // Yield after loading shader
+            var shaderRequest = Resources.LoadAsync<ComputeShader>("Shaders/StrokeGeneration");
+            yield return shaderRequest;
+            
+            if (shaderRequest.asset != null)
+            {
+                _gpuStampGenerator = new GpuStrokeStampGenerator(shaderRequest.asset as ComputeShader);
+                _useGpuStamping = true;
+            }
+            else
+            {
+                Debug.LogWarning("[CanvasRenderer] Compute Shader not found in Resources/Shaders/StrokeGeneration. Falling back to CPU.");
+                _useGpuStamping = false;
+            }
             
             // 2. Layout Controller (RenderTexture Allocation - Heavy)
             _layoutController = new CanvasLayoutController(_displayImage, _resolution, 0);
@@ -124,10 +128,12 @@ namespace Features.Drawing.Presentation
                 _brushMaterial.mainTexture = _defaultBrushTip;
 
             // Setup CommandBuffer
+            if (_cmd != null) _cmd.Release();
             _cmd = new CommandBuffer();
             _cmd.name = "DrawingBuffer";
 
             // Create Quad Mesh for stamping
+            if (_quadMesh != null) Destroy(_quadMesh);
             _quadMesh = CreateQuad();
             
             // Init props
@@ -144,31 +150,6 @@ namespace Features.Drawing.Presentation
         private void OnLayoutChanged()
         {
             ApplyStampGeneratorScale();
-        }
-
-
-        private void InitializeGpuGenerator()
-        {
-            if (_gpuStampGenerator != null) return;
-
-            // Try load Compute Shader
-            var shader = Resources.Load<ComputeShader>("Shaders/StrokeGeneration");
-            if (shader != null)
-            {
-                _gpuStampGenerator = new GpuStrokeStampGenerator(shader);
-                // Debug.Log("[CanvasRenderer] GPU Stroke Generation Enabled.");
-                _useGpuStamping = true;
-            }
-            else
-            {
-                Debug.LogWarning("[CanvasRenderer] Compute Shader not found in Resources/Shaders/StrokeGeneration. Falling back to CPU.");
-                _useGpuStamping = false;
-            }
-        }
-
-        private void OnEnable()
-        {
-            InitializeGpuGenerator();
         }
 
         private void OnDisable()
@@ -388,19 +369,22 @@ namespace Features.Drawing.Presentation
                  return;
              }
 
-             // Slow path
-             // We need to convert to list or iterate. 
-             // Since internal logic needs a list or array for GPU/Stamping?
-             // Actually ProcessPoints takes IEnumerable.
-             // But let's consolidate logic.
-             // To avoid allocation, we can't easily convert to List without new.
-             // But we can just run the logic.
-             
-             DrawPointsInternal(points, -1);
+             // Slow path: Convert to list to support internal List API
+             if (_enableDiagnostics && Debug.isDebugBuild)
+             {
+                 Debug.LogWarning($"[CanvasRenderer] DrawPoints(IEnumerable) slow path triggered. boxing occurred. Count: {points.GetType().Name}");
+             }
+             var temp = new List<LogicPoint>(points);
+             DrawPointsInternal(temp, temp.Count);
         }
 
-        private void DrawPointsInternal(IEnumerable<LogicPoint> points, int countHint)
+        private void DrawPointsInternal(List<LogicPoint> points, int countHint)
         {
+            if (_layoutController == null || _cmd == null || _brushMaterial == null || _quadMesh == null || _props == null)
+            {
+                return;
+            }
+
             if (_layoutController.ActiveRT == null)
             {
                 Debug.LogError("[CanvasRenderer] ActiveRT is null!");
@@ -411,6 +395,7 @@ namespace Features.Drawing.Presentation
 
             _layoutController.CheckLayoutChanges();
             _cmd.Clear();
+            _stampBuffer.Clear();
             
             // Setup Eraser vs Brush state
             if (_isEraser)
@@ -442,12 +427,7 @@ namespace Features.Drawing.Presentation
             // Also, GPU implementation is stateless and doesn't handle distance accumulation across small batches well.
             // So we only use GPU for large batch processing (e.g. redraw, history undo/redo).
             
-            int pointsCount = countHint >= 0 ? countHint : 0;
-            if (countHint < 0)
-            {
-                if (points is ICollection<LogicPoint> col) pointsCount = col.Count;
-                else { foreach(var _ in points) pointsCount++; }
-            }
+            int pointsCount = points.Count;
 
             bool shouldTryGpu = !_forceCpuMode && _useGpuStamping && _gpuStampGenerator != null && pointsCount > 10;
 
@@ -471,11 +451,6 @@ namespace Features.Drawing.Presentation
                 _stampGenerator.ProcessPoints(points, _brushSize, _stampBuffer);
             }
             
-            if (_enableDiagnostics)
-            {
-                 Debug.Log($"[Renderer] Generated {_stampBuffer.Count} stamps from {pointsCount} points. RT: {_layoutController.ActiveRT != null}");
-            }
-
             // Debug if empty
             if (_stampBuffer.Count == 0 && pointsCount > 0)
             {

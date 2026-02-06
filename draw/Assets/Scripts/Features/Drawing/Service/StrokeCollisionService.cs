@@ -12,6 +12,10 @@ namespace Features.Drawing.Service
     public class StrokeCollisionService : IStrokeCollisionService
     {
         private readonly StrokeSpatialIndex _spatialIndex;
+        
+        // Zero-GC Buffers
+        private readonly List<StrokeEntity> _inkBuffer = new List<StrokeEntity>(32);
+        private readonly List<StrokeEntity> _eraserBuffer = new List<StrokeEntity>(16);
 
         // Dynamic ratio, initialized to default but updateable via SetLogicToWorldRatio
         private float _logicToWorldRatio = DrawingConstants.LOGIC_TO_WORLD_RATIO;
@@ -48,8 +52,8 @@ namespace Features.Drawing.Service
             var candidates = _spatialIndex.Query(bounds);
 
             // Separate candidates into Inks and Erasers
-            var inks = new List<StrokeEntity>();
-            var erasers = new List<StrokeEntity>();
+            _inkBuffer.Clear();
+            _eraserBuffer.Clear();
 
             foreach (var s in candidates)
             {
@@ -57,16 +61,16 @@ namespace Features.Drawing.Service
 
                 if (s.BrushId == DrawingConstants.ERASER_BRUSH_ID)
                 {
-                    erasers.Add(s);
+                    _eraserBuffer.Add(s);
                 }
                 else
                 {
-                    inks.Add(s);
+                    _inkBuffer.Add(s);
                 }
             }
 
             // If no ink at all, discard immediately
-            if (inks.Count == 0)
+            if (_inkBuffer.Count == 0)
             {
                 return false;
             }
@@ -81,7 +85,7 @@ namespace Features.Drawing.Service
                 var p = eraserStroke.Points[i];
 
                 // Check against inks
-                foreach (var ink in inks)
+                foreach (var ink in _inkBuffer)
                 {
                     // 1. Check distance to ink (using the relaxed threshold)
                     float inkThreshold = (eraserRadius + ink.Size * 0.5f) * scale * 1.2f;
@@ -93,7 +97,7 @@ namespace Features.Drawing.Service
                         // Now check if it is obscured by any EXISTING eraser that is NEWER than the ink.
                         bool isObscured = false;
 
-                        foreach (var existingEraser in erasers)
+                        foreach (var existingEraser in _eraserBuffer)
                         {
                             // Only check erasers that came AFTER the ink (and thus could cover it)
                             // AND exclude the current eraser itself

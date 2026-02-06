@@ -35,6 +35,7 @@ namespace Features.Drawing.Presentation
         
         private StrokeStampGenerator _stampGenerator = new StrokeStampGenerator();
         private List<StampData> _stampBuffer = new List<StampData>(1024);
+        private List<LogicPoint> _pointBuffer = new List<LogicPoint>(1024);
         private const int BATCH_SIZE = 1023;
         private Matrix4x4[] _matrices = new Matrix4x4[BATCH_SIZE];
 
@@ -187,7 +188,14 @@ namespace Features.Drawing.Presentation
             _stampGenerator.Reset();
             
             // Generate stamps
-            _stampGenerator.ProcessPoints(points, size, _stampBuffer);
+            var pointList = points as List<LogicPoint>;
+            if (pointList == null)
+            {
+                _pointBuffer.Clear();
+                _pointBuffer.AddRange(points);
+                pointList = _pointBuffer;
+            }
+            _stampGenerator.ProcessPoints(pointList, size, _stampBuffer);
             DrawStampsInternal(_stampBuffer, color, isEraser, strategy);
             _stampBuffer.Clear();
         }

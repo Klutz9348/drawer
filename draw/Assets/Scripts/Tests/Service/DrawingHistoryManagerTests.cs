@@ -152,7 +152,6 @@ namespace Tests.Service
                 smoothing,
                 collision,
                 history,
-                null,
                 registry,
                 eraser,
                 null

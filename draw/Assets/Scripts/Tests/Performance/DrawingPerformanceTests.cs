@@ -4,6 +4,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
 using Features.Drawing.App;
+using Features.Drawing.Domain;
 using Features.Drawing.Domain.ValueObject;
 using Features.Drawing.Presentation;
 using UnityEngine.SceneManagement;
@@ -47,6 +48,34 @@ namespace Tests.Performance
             // 3. Setup AppService
             _appService = _appObject.AddComponent<DrawingAppService>();
             
+            // Minimal DI Setup
+            var eraserStrategy = ScriptableObject.CreateInstance<BrushStrategy>();
+            var brushes = new BrushStrategy[0];
+            var brushRegistry = new Features.Drawing.Service.BrushRegistryService(brushes, eraserStrategy);
+            var inputState = new Features.Drawing.App.State.InputStateManager(_renderer, eraserStrategy);
+            
+            var smoothing = new Features.Drawing.Service.StrokeSmoothingService();
+            var collision = new Features.Drawing.Service.StrokeCollisionService();
+            var history = new Features.Drawing.Service.DrawingHistoryManager(_renderer, smoothing, collision);
+            
+            var logger = new Common.Diagnostics.StructuredLogger("PerfTest", 0, false);
+            
+            var inputHandler = new Features.Drawing.App.Input.StrokeInputHandler(
+                inputState, _renderer, smoothing, collision, history, 
+                brushRegistry, eraserStrategy, logger
+            );
+
+            _appService.Initialize(
+                _renderer,
+                inputState,
+                inputHandler,
+                null, 
+                brushRegistry,
+                history,
+                smoothing,
+                logger
+            );
+
             // Wait for CanvasRenderer's async initialization (InitializeRoutine)
             // It yields at least once. Wait a few frames to be safe.
             for (int i = 0; i < 5; i++) yield return null;

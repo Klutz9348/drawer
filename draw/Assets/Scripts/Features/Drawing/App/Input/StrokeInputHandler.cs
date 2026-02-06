@@ -7,7 +7,6 @@ using Features.Drawing.Domain.Interface;
 using Features.Drawing.App.State;
 using Features.Drawing.App.Command;
 using Features.Drawing.Service;
-using Features.Drawing.Service.Network;
 using Common.Utils;
 using Common.Diagnostics;
 
@@ -19,8 +18,7 @@ namespace Features.Drawing.App.Input
         private readonly IStrokeRenderer _renderer;
         private readonly IStrokeSmoothingService _smoothingService;
         private readonly IStrokeCollisionService _collisionService;
-        private readonly DrawingHistoryManager _historyManager;
-        private readonly DrawingNetworkService _networkService;
+        private readonly IDrawingHistoryManager _historyManager;
         private readonly IBrushRegistry _brushRegistry;
         private readonly IStructuredLogger _logger;
         private readonly BrushStrategy _eraserStrategy;
@@ -40,14 +38,14 @@ namespace Features.Drawing.App.Input
         private List<LogicPoint> _smoothingOutputBuffer = new List<LogicPoint>(64);
         private List<LogicPoint> _singlePointBuffer = new List<LogicPoint>(1);
         private readonly LogicPoint[] _singlePointArray = new LogicPoint[1];
+        private readonly List<IStrokeEventListener> _listeners = new List<IStrokeEventListener>();
         
         public StrokeInputHandler(
             InputStateManager inputState,
             IStrokeRenderer renderer,
             IStrokeSmoothingService smoothingService,
             IStrokeCollisionService collisionService,
-            DrawingHistoryManager historyManager,
-            DrawingNetworkService networkService,
+            IDrawingHistoryManager historyManager,
             IBrushRegistry brushRegistry,
             BrushStrategy eraserStrategy,
             IStructuredLogger logger = null)
@@ -57,10 +55,19 @@ namespace Features.Drawing.App.Input
             _smoothingService = smoothingService;
             _collisionService = collisionService;
             _historyManager = historyManager;
-            _networkService = networkService;
             _brushRegistry = brushRegistry;
             _eraserStrategy = eraserStrategy;
             _logger = logger;
+        }
+
+        public void RegisterListener(IStrokeEventListener listener)
+        {
+            if (!_listeners.Contains(listener)) _listeners.Add(listener);
+        }
+
+        public void UnregisterListener(IStrokeEventListener listener)
+        {
+            _listeners.Remove(listener);
         }
 
         public void SetLogicToWorldRatio(float ratio)
@@ -69,7 +76,7 @@ namespace Features.Drawing.App.Input
             _collisionService?.SetLogicToWorldRatio(ratio);
         }
 
-        public void StartStroke(LogicPoint point, long sequenceId)
+        public void StartStroke(LogicPoint point, long sequenceId, int authorId = 0)
         {
             if (_inputState == null) return;
 
@@ -82,7 +89,8 @@ namespace Features.Drawing.App.Input
                     { "isEraser", _inputState.IsEraser },
                     { "size", _inputState.CurrentSize },
                     { "color", _inputState.CurrentColor },
-                    { "point", point.ToString() }
+                    { "point", point.ToString() },
+                    { "authorId", authorId }
                 };
                 _logger.Info("StrokeStarted", _activeStrokeTrace, meta);
             }
@@ -97,11 +105,12 @@ namespace Features.Drawing.App.Input
             uint id = (uint)Random.Range(0, int.MaxValue); 
             uint seed = (uint)Random.Range(0, int.MaxValue);
             
-            ushort brushId = _brushRegistry.GetBrushId(_inputState.CurrentStrategy);
+            var activeStrategy = _inputState.IsEraser ? _eraserStrategy : _inputState.CurrentStrategy;
+            ushort brushId = _brushRegistry.GetBrushId(activeStrategy);
             
             _currentStroke = new StrokeEntity(
                 id, 
-                0, // Local Author
+                (ushort)authorId, // Support Multi-author
                 brushId, 
                 seed, 
                 _inputState.CurrentColor, 
@@ -109,6 +118,12 @@ namespace Features.Drawing.App.Input
                 sequenceId,
                 _currentStrokeRaw 
             );
+
+            // Notify Listeners
+            foreach (var listener in _listeners)
+            {
+                listener.OnStrokeStarted(_currentStroke);
+            }
 
             // Init Optimization State
             _lastAddedPoint = point;
@@ -119,20 +134,6 @@ namespace Features.Drawing.App.Input
 
             // Start Renderer
             _renderer.StartStroke(point, _inputState.IsEraser, _inputState.CurrentSize, _inputState.CurrentColor);
-
-            // Network
-            if (_networkService != null && _networkService.isActiveAndEnabled)
-            {
-                _networkService.OnLocalStrokeStarted(
-                    _currentStroke.Id, 
-                    _currentStroke.BrushId, 
-                    _currentStroke.Color, 
-                    _currentStroke.Size, 
-                    _inputState.IsEraser
-                );
-                // Send first point immediately
-                _networkService.OnLocalStrokeMoved(point);
-            }
         }
 
         public void MoveStroke(LogicPoint point)
@@ -183,6 +184,12 @@ namespace Features.Drawing.App.Input
             _lastAddedPoint = pointToAdd;
             AddPoint(pointToAdd);
 
+            // Notify Listeners (Optional: Real-time update)
+            foreach (var listener in _listeners)
+            {
+                listener.OnStrokeUpdated(_currentStroke, pointToAdd);
+            }
+
             // Draw Logic (Simplified Smoothing)
             // We use the raw list to look back
             int count = _currentStrokeRaw.Count;
@@ -203,12 +210,6 @@ namespace Features.Drawing.App.Input
                 _singlePointBuffer.Clear();
                 _singlePointBuffer.Add(pointToAdd);
                 _renderer.DrawPoints(_singlePointBuffer);
-            }
-
-            // Network
-            if (_networkService != null && _networkService.isActiveAndEnabled)
-            {
-                _networkService.OnLocalStrokeMoved(pointToAdd);
             }
         }
 
@@ -266,15 +267,15 @@ namespace Features.Drawing.App.Input
             
             // Spatial Indexing
             _collisionService.Insert(_currentStroke);
-
-            // Network Sync
-            if (_networkService != null && _networkService.isActiveAndEnabled)
-            {
-                uint checksum = DrawingNetworkService.ComputeStrokeChecksum(_currentStroke.Points);
-                _networkService.OnLocalStrokeEnded(checksum, _currentStroke.Points.Count);
-            }
             
             _renderer.EndStroke();
+
+            // Notify Listeners
+            foreach (var listener in _listeners)
+            {
+                listener.OnStrokeCompleted(_currentStroke);
+            }
+
             _currentStroke = null;
         }
 
