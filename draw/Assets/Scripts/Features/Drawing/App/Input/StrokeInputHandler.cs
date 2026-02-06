@@ -39,6 +39,7 @@ namespace Features.Drawing.App.Input
         private List<LogicPoint> _smoothingInputBuffer = new List<LogicPoint>(8);
         private List<LogicPoint> _smoothingOutputBuffer = new List<LogicPoint>(64);
         private List<LogicPoint> _singlePointBuffer = new List<LogicPoint>(1);
+        private readonly LogicPoint[] _singlePointArray = new LogicPoint[1];
         
         public StrokeInputHandler(
             InputStateManager inputState,
@@ -280,6 +281,12 @@ namespace Features.Drawing.App.Input
         private void AddPoint(LogicPoint point)
         {
             _currentStrokeRaw.Add(point);
+
+            if (_currentStroke != null)
+            {
+                _singlePointArray[0] = point;
+                _currentStroke.AddPoints(_singlePointArray);
+            }
         }
     }
 }

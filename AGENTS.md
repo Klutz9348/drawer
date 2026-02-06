@@ -22,7 +22,8 @@
 | **LogicPoint** | 与分辨率无关的坐标结构体。使用 `ushort` (0-65535) 表示 X/Y，以确保跨设备的确定性行为。 | `Domain/ValueObject` |
 | **StampData** | 代表单个画笔图章（位置、旋转、大小）的结构体。 | `Domain/ValueObject` |
 | **Stroke** | 绘图的基本实体。包含 `LogicPoint` 列表、画笔 ID、颜色、随机种子和唯一 ID。 | `Domain/Entity` |
-| **Command Pattern** | 所有状态更改（绘制、擦除、清除）都封装为 `ICommand` 对象，以支持撤销/重做和序列化。 | `App/Command` |
+| **Command Pattern** | 所有状态更改（绘制、擦除、清除）都封装为 `ICommand` 对象，以支持撤销/重做和序列化。支持逐笔撤销。 | `App/Command` |
+| **History Sliding Window** | 保持最近 50 个命令为“活跃”状态以便快速撤销/修改。超出窗口的命令将被“烘焙”到底层并归档。 | `Service/HistoryManager` |
 | **Spatial Index** | 一种基于网格的空间哈希系统，用于加速橡皮擦碰撞检测。 | `Service/StrokeSpatialIndex` |
 | **LogicToWorld** | 将 `LogicPoint` (0-65535) 转换为世界空间（像素）的比率。根据 Canvas 分辨率动态变化。 | `DrawingConstants`, `AppService` |
 | **Ghost Layer** | 一个临时的覆盖层，用于在远程笔画提交到历史记录之前实时渲染它们。 | `Presentation/GhostOverlayRenderer` |
@@ -82,7 +83,7 @@ graph TD
 ### 3.2 层级职责
 
 1.  **Presentation (Unity)**:
-    *   **CanvasRenderer**: 处理 `CommandBuffer`, `Mesh`, `Material`。**纯视觉表现**。实现 `IStrokeRenderer` 和 `ICanvasResolutionProvider`。
+    *   **CanvasRenderer**: 处理 `CommandBuffer`, `Mesh`, `Material`。**纯视觉表现**。实现 `IStrokeRenderer` 和 `ICanvasResolutionProvider`。使用 **Mesh Stamping** 技术进行绘制。
     *   **CanvasLayoutController**: 管理分辨率/宽高比和 RenderTextures（与 Renderer 分离）。
     *   **GhostOverlayRenderer**: 处理远程笔画的临时渲染。实现 `IGhostRenderer`。
     *   **规则**: 永远不要在这里放置业务逻辑。使用 **保留模式 (Retained Mode)**。必须通过 `IDrawingFacade` 与应用层通信。
@@ -92,7 +93,7 @@ graph TD
     *   **Data**: `LocalFileDrawingRepository` 实现数据持久化。
     *   **规则**: 管理 `TraceContext`。处理依赖注入。
 3.  **Service (Logic)**:
-    *   **HistoryManager**: 管理撤销/重做堆栈。
+    *   **HistoryManager**: 管理撤销/重做堆栈。实现滑动窗口策略（保留最近 50 笔活跃）。
     *   **StrokeCollisionService**: 处理橡皮擦逻辑。
     *   **DrawingNetworkService**: 处理数据包缓冲、压缩和 Ghost 状态管理。
     *   **规则**: 尽可能无状态。负责繁重的计算。
@@ -114,11 +115,12 @@ graph TD
     *   **网络钩子**: 在 Start/Move/End 笔画事件上调用 `DrawingNetworkService`。
 
 ### 4.2 CanvasRenderer (画师)
-*   **职责**: GPU 加速渲染。
+*   **职责**: GPU 加速渲染，使用 Mesh Stamping 技术。
 *   **优化**:
     *   **初始化**: 使用显式 `Initialize()` 方法（同步）。无协程。
     *   **Shader 预热**: 在 `InitializeGraphics` 中使用 `ShaderVariantCollection` 以防止第一笔卡顿。
     *   **资源清理**: 在 `OnDestroy` 中显式销毁 Materials/Meshes。
+    *   **状态重置**: 依赖 `StartStroke` 来重置内部的 `StrokeStampGenerator` 状态，确保插值正确。
 
 ### 4.3 StrokeCollisionService (橡皮擦)
 *   **算法**: 空间哈希 + 欧几里得距离。
@@ -126,21 +128,22 @@ graph TD
     *   **去重**: 过滤掉离前一个点太近的橡皮擦点（画笔大小的 10%）。
     *   **有效性检查**: 丢弃未击中任何墨迹的橡皮擦笔画（节省历史空间）。
 
-### 4.4 DrawingNetworkService (信使)
+### 4.4 HistoryManager (时间守护者)
+*   **职责**: 维护 `Undo`/`Redo` 栈和命令生命周期。
+*   **策略**:
+    *   **逐笔撤销**: `Undo` 操作仅弹出栈顶的单个命令，并触发重绘。
+    *   **滑动窗口**: 保持最近 50 个命令为“活跃”状态（在内存中作为对象）。旧于此的命令被“烘焙”到背景纹理并归档，以控制内存使用和重绘成本。
+    *   **边界检查**: 防止在空栈上执行撤销。
+
+### 4.5 DrawingNetworkService (信使)
 *   **职责**: 实时同步。
 *   **协议**: 混合同步 (Ghost Layer + Commit)。
 *   **关键逻辑**:
     *   **Delta 压缩**: 使用 `StrokeDeltaCompressor` (VarInt + Relative) 最小化带宽。
     *   **自适应批处理**: 聚合点（10 个计数或 33ms）以平衡开销和延迟。
     *   **冗余**: 在数据包中包含前一批数据以从丢包中恢复（1 个数据包回溯）。
-    *   **载荷长度**: `UpdateStroke` 数据包携带显式载荷长度；接收者必须遵守长度（池化缓冲区可能大于逻辑数据）。
-    *   **载荷所有权**: `SendUpdateStroke` 将载荷缓冲区视为临时的；如果异步使用，客户端必须复制。调用者可以在发送后立即回收池化缓冲区。
-    *   **校验和**: `EndStroke` 包含对每个 `LogicPoint` 的 `(X,Y,Pressure)` 顺序计算的校验和 (FNV-1a 32-bit)。用于检测不同步；严格模式下可拒绝不匹配。
-    *   **画笔验证**: 当启用严格/白名单验证时，可以拒绝 `UNKNOWN_BRUSH_ID`。
-    *   **构建默认值**: 在 Debug/Development 中，严格验证 + 未知拒绝默认开启。Release 默认关闭（通过 `_useBuildDefaults` 覆盖）。
-    *   **预测**: 使用客户端外推（基于速度）来掩盖 Ghost Layer 中的网络抖动。
+    *   **校验和**: `EndStroke` 包含对每个 `LogicPoint` 的校验和 (FNV-1a 32-bit)。
     *   **Ghost 渲染**: 在保留循环中驱动 `GhostOverlayRenderer`。
-    *   **提交**: 在 `EndStroke` 时，重建完整的 `StrokeEntity` 并将其提交给 `DrawingAppService`。
 
 ## 5. AI Agent 开发指南
 
@@ -184,6 +187,8 @@ graph TD
 | **第一笔卡顿** | Shader 未预热。 | 运行 `Tools/Drawing/Assign Shader Variants`。 |
 | **橡皮擦未命中/偏移** | `LogicToWorldRatio` 不匹配。 | 确保在调整大小时调用 `UpdateResolutionRatio`。 |
 | **内存泄漏** | Native 资源未释放。 | 检查 `CanvasRenderer` 中的 `OnDestroy`。 |
+| **撤销后画布空白** | `StrokeStampGenerator` 状态未重置，导致插值失败。 | 确保 `DrawStrokeCommand` 在执行前调用 `renderer.StartStroke()` 以重置生成器状态。 |
+| **构建失败 (posix_spawn)** | 系统进程/内存资源耗尽 (Resource temporarily unavailable)。 | 1. 重启计算机 (清除僵尸进程)。<br>2. 关闭高资源消耗应用 (Chrome/IDE)。<br>3. 清理 `Build` 文件夹。 |
 | **粉色材质** | Shader 从构建中剥离。 | 将 Shader 添加到 `Always Included Shaders`。 |
 
 ## 7. 部署与验证

@@ -471,6 +471,11 @@ namespace Features.Drawing.Presentation
                 _stampGenerator.ProcessPoints(points, _brushSize, _stampBuffer);
             }
             
+            if (_enableDiagnostics)
+            {
+                 Debug.Log($"[Renderer] Generated {_stampBuffer.Count} stamps from {pointsCount} points. RT: {_layoutController.ActiveRT != null}");
+            }
+
             // Debug if empty
             if (_stampBuffer.Count == 0 && pointsCount > 0)
             {
